@@ -1,6 +1,9 @@
 import numpy as np
 import pandas as pd
 import joblib
+import os
+import json
+import argparse
 
 from datetime import datetime
 from sklearn.tree import DecisionTreeRegressor
@@ -10,13 +13,16 @@ from typing import Type
 from src.gradient_boosting import WEAK_LEARNERS_MAP
 from src.gradient_boosting.utils import derivative_mean_squared_error
 
-class GradientBoostingRegressor:
+class GradientBoostingRegressionTrainer:
     """
-    A custom Gradient Boosting Regressor implementation supporting 
-    subsampling and early stopping.
+    A custom Gradient Boosting Regression Trainer implementation
+    supporting subsampling and early stopping.
     """
     def __init__(self):
         """Initializes the Gradient Boosting Regressor with empty state containers."""
+        self.dataset_name: str | None = None
+        self.timestamp: str | None = None
+
         self.X: pd.DataFrame | None = None
         self.y: pd.Series | None = None
         self.pseudo_residuals: pd.Series | None = None
@@ -33,7 +39,11 @@ class GradientBoostingRegressor:
         self.best_test_loss: float = float('inf')
         self.best_iteration: int = 0
 
-    def _setup_data(self, data: pd.DataFrame, target: str) -> None:
+    def _load_data(self, dataset: str):
+        self.dataset_name = os.path.splitext(dataset)[0]
+        self.data = pd.read_csv(f"data/training/{dataset}")
+
+    def _setup_data(self, target: str) -> None:
         """
         Prepares the feature matrix and target vector.
         
@@ -41,8 +51,8 @@ class GradientBoostingRegressor:
             data: The full input DataFrame containing features and target.
             target: The name of the target column.
         """
-        self.y = data[target].copy()
-        self.X = data.drop(columns=[target])
+        self.y = self.data[target].copy()
+        self.X = self.data.drop(columns=[target])
 
     def _setup_weak_learner(self, weak_learner_name: str) -> None:
         """
@@ -131,8 +141,8 @@ class GradientBoostingRegressor:
 
     def _save_ensemble(self) -> None:
         """Saves the current model state to disk with a timestamped filename."""
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"models/gradient_boosting/{timestamp}.joblib"
+        self.timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"models/{self.dataset_name}/{self.timestamp}.joblib"
         
         model_data = {
             "weights": self.weights,
@@ -140,15 +150,28 @@ class GradientBoostingRegressor:
         }
         joblib.dump(model_data, filename)
 
+    def _update_registry(self):
+        try:
+            with open('data.json', 'r') as file:
+                registry = json.load(file)
+        except (json.JSONDecodeError, FileNotFoundError):
+            registry = {}
+        
+        if self.dataset_name not in registry:
+            registry[self.dataset_name] = self.timestamp
+        
+        with open("models/registry.json", 'w', encoding='utf-8') as file:
+            json.dump(registry, file, indent=4)
+
     def run(
         self,
-        data: pd.DataFrame,
+        dataset: str,
         target: str,
         weak_learner: str,
         upsilon: float,
         learning_rate: float,
         patience: int,
-        M: int,
+        max_iter: int,
         **model_params
     ) -> None:
         """
@@ -164,11 +187,13 @@ class GradientBoostingRegressor:
             M: Maximum number of iterations.
             **model_params: Hyperparameters for the weak learner.
         """
-        self._setup_data(data=data, target=target)
+        self._load_data(dataset=dataset)
+        self._setup_data(target=target)
         self._setup_weak_learner(weak_learner_name=weak_learner)
         self._initialize_model()
 
-        for m in range(M):
+        for m in range(max_iter):
+            print(f"Iteration: {m}")
             self._draw_subsample(upsilon=upsilon)
             self._compute_pseudo_residuals()
             self._fit_weak_learner(**model_params)
@@ -178,3 +203,28 @@ class GradientBoostingRegressor:
                 break
         
         self._save_ensemble()
+        self._update_registry()
+
+if __name__=="__main__":
+    parser = argparse.ArgumentParser(description="Run training on a regression task")
+
+    parser.add_argument("--dataset", type=str, required=True)
+    parser.add_argument("--target", type=str, required=True)
+    parser.add_argument("--weak_learner", type=str, required=True)
+    parser.add_argument("--upsilon", type=float, required=True)
+    parser.add_argument("--learning_rate", type=float, required=True)
+    parser.add_argument("--patience", type=int, required=True)
+    parser.add_argument("--max_iter", type=int, required=True)
+
+    args = parser.parse_args()
+
+    gradient_boosting_regression_trainer = GradientBoostingRegressionTrainer()
+    gradient_boosting_regression_trainer.run(
+        dataset=args.dataset,
+        target=args.target,
+        weak_learner=args.weak_learner,
+        upsilon=args.upsilon,
+        learning_rate=args.learning_rate,
+        patience=args.patience,
+        max_iter=args.max_iter
+    )
