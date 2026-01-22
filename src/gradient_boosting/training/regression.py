@@ -41,7 +41,7 @@ class GradientBoostingRegressionTrainer:
 
     def _load_data(self, dataset: str):
         self.dataset_name = os.path.splitext(dataset)[0]
-        self.data = pd.read_csv(f"data/training/{dataset}")
+        self.data = pd.read_csv(f"data/processed/{dataset}")
 
     def _setup_data(self, target: str) -> None:
         """
@@ -102,7 +102,6 @@ class GradientBoostingRegressionTrainer:
         model.fit(X_sub, y_residuals)
         
         self.models.append(model)
-        self.iteration += 1
 
     def _update_model(self, learning_rate: float) -> None:
         """
