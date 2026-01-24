@@ -1,208 +1,184 @@
-import numpy as np
-import pandas as pd
-import joblib
 import os
 import json
 import argparse
+import logging
+import joblib
+import numpy as np
+import pandas as pd
 
 from datetime import datetime
+from sklearn.model_selection import train_test_split
 from sklearn.tree import DecisionTreeRegressor
 from sklearn.metrics import mean_squared_error
 from typing import Type
+from pathlib import Path
 
 from src.gradient_boosting import WEAK_LEARNERS_MAP
 from src.gradient_boosting.utils import derivative_mean_squared_error
 
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
 class GradientBoostingRegressionTrainer:
     """
-    A custom Gradient Boosting Regression Trainer implementation
-    supporting subsampling and early stopping.
+    Gradient Boosting Regressor supporting subsampling and early stopping 
+    on a validation set.
     """
     def __init__(self):
-        """Initializes the Gradient Boosting Regressor with empty state containers."""
         self.dataset_name: str | None = None
         self.timestamp: str | None = None
-
-        self.X: pd.DataFrame | None = None
-        self.y: pd.Series | None = None
-        self.pseudo_residuals: pd.Series | None = None
+        
+        self.X_train: pd.DataFrame | None = None
+        self.X_val: pd.DataFrame | None = None
+        self.y_train: pd.Series | None = None
+        self.y_val: pd.Series | None = None
         
         self.weights: list[float] = []
-        self.models: list[DecisionTreeRegressor] = []
+        self.models: list[object] = []
+        self.weak_learner_class: Type | None = None
         
-        self.preds: np.ndarray | None = None
+        self.train_preds: np.ndarray | None = None
+        self.pseudo_residuals: pd.Series | None = None
         self.subsample_idx: np.ndarray | None = None
         
-        # Stores the class definition (e.g., DecisionTreeRegressor), not an instance
-        self.weak_learner_class: Type | None = None 
-        
-        self.best_test_loss: float = float('inf')
+        self.best_val_loss: float = float('inf')
         self.best_iteration: int = 0
 
-    def _load_data(self, dataset: str):
-        self.dataset_name = os.path.splitext(dataset)[0]
-        self.data = pd.read_csv(f"data/processed/{dataset}")
-
-    def _setup_data(self, target: str) -> None:
-        """
-        Prepares the feature matrix and target vector.
+    def _load_data(self, dataset: str, target: str, test_size: float = 0.2) -> None:
+        '''Load data and split into train/test.'''
+        self.dataset_name = Path(dataset).stem.removesuffix("_train")
+        path = Path("data/processed") / dataset
+        logger.info(f"Loading data from {path}")
+        data = pd.read_csv(path)
+        X = data.drop(columns=[target])
+        y = data[target]
         
-        Args:
-            data: The full input DataFrame containing features and target.
-            target: The name of the target column.
-        """
-        self.y = self.data[target].copy()
-        self.X = self.data.drop(columns=[target])
+        self.X_train, self.X_val, self.y_train, self.y_val = train_test_split(
+            X, y, test_size=test_size, random_state=42
+        )
+        logger.info(f"Data split: {len(self.X_train)} train, {len(self.X_val)} validation samples.")
 
-    def _setup_weak_learner(self, weak_learner_name: str) -> None:
-        """
-        Selects the weak learner class from the global map.
-        
-        Args:
-            weak_learner_name: Key to look up in WEAK_LEARNERS_MAP.
-        """
+    def _get_weak_learner(self, weak_learner_name: str) -> None:
+        '''Setup weak learner class.'''
         self.weak_learner_class = WEAK_LEARNERS_MAP[weak_learner_name]
 
     def _initialize_model(self) -> None:
-        """
-        Initializes the model with the mean of the target values (constant prediction).
-        """
-        y_mean = self.y.mean()
+        """Initializes model with mean target value."""
+        y_mean = self.y_train.mean()
         self.weights.append(y_mean)
-        self.preds = np.full(len(self.y), y_mean)
+        self.train_preds = np.full(len(self.y_train), y_mean)
         
-        self.best_test_loss = float('inf')
+        self.best_val_loss = float('inf')
         self.best_iteration = 0
+        logger.info(f"Model initialized with mean: {y_mean:.4f}")
 
     def _draw_subsample(self, upsilon: float) -> None:
-        """
-        Selects a random subset of indices for stochastic boosting.
-        
-        Args:
-            upsilon: The fraction of data to subsample (0.0 < upsilon <= 1.0).
-        """
-        n = len(self.X)
+        """Stochastic subsampling of training indices."""
+        n = len(self.X_train)
         sample_size = int(upsilon * n)
         self.subsample_idx = np.random.choice(np.arange(n), size=sample_size, replace=False)
 
     def _compute_pseudo_residuals(self) -> None:
-        """Computes the negative gradient (pseudo-residuals) for the current subsample."""
-        y_sub = self.y.values[self.subsample_idx]
-        preds_sub = self.preds[self.subsample_idx]
+        """Computes residuals for the current subsample."""
+        y_sub = self.y_train.values[self.subsample_idx]
+        preds_sub = self.train_preds[self.subsample_idx]
         
-        residuals = derivative_mean_squared_error(y=y_sub, y_preds=preds_sub)
-        self.pseudo_residuals = pd.Series(residuals, index=self.X.index[self.subsample_idx])
+        residuals = - derivative_mean_squared_error(y=y_sub, y_preds=preds_sub)
+        self.pseudo_residuals = pd.Series(residuals, index=self.X_train.index[self.subsample_idx])
 
     def _fit_weak_learner(self, **kwargs) -> None:
-        """Fits a new weak learner instance to the current pseudo-residuals."""
-        X_sub = self.X.iloc[self.subsample_idx]
-        y_residuals = self.pseudo_residuals
-        
+        '''Fits weak learner on pseudo-residuals.'''
+        X_sub = self.X_train.iloc[self.subsample_idx]
         model = self.weak_learner_class(**kwargs)
-        model.fit(X_sub, y_residuals)
-        
+        model.fit(X_sub, self.pseudo_residuals)
         self.models.append(model)
 
-    def _update_model(self, learning_rate: float) -> None:
-        """
-        Updates global predictions by adding the weighted predictions of the new tree.
-        
-        Args:
-            learning_rate: The shrinkage factor (eta).
-        """
-        latest_model = self.models[-1]
-        
-        new_preds = latest_model.predict(self.X)
-        self.preds += learning_rate * new_preds
+    def _update_train_preds(self, learning_rate: float) -> None:
+        """Updates training predictions for the next residual calculation."""
+        new_preds = self.models[-1].predict(self.X_train)
+        self.train_preds += learning_rate * new_preds
         self.weights.append(learning_rate)
 
     def _check_early_stopping(self, iteration: int, patience: int) -> bool:
-        """
-        Checks if training should stop based on convergence.
-        
-        Returns:
-            bool: True if training should stop, False otherwise.
-        """
-        current_loss = mean_squared_error(y_true=self.y, y_pred=self.preds)
+        """Calculates loss on Validation Set and handles early stopping."""
+        val_preds = np.full(len(self.y_val), self.weights[0])
+        for weight, model in zip(self.weights[1:], self.models):
+            val_preds += weight * model.predict(self.X_val)
 
-        if current_loss < self.best_test_loss:
-            self.best_test_loss = current_loss
+        current_loss = mean_squared_error(y_true=self.y_val, y_pred=val_preds)
+        logger.info(f"Iteration: {iteration} | Validation loss: {current_loss:.4f}")
+
+        if current_loss < self.best_val_loss:
+            self.best_val_loss = current_loss
             self.best_iteration = iteration
+            logger.debug(f"New best validation loss: {current_loss:.4f} at iter {iteration}")
             return False
         
         if iteration - self.best_iteration >= patience:
+            logger.info(f"Early stopping triggered at iteration {iteration}. Best iter: {self.best_iteration}")
             valid_count = self.best_iteration
-            self.weights = self.weights[:valid_count + 1] 
+            self.weights = self.weights[:valid_count + 1]
             self.models = self.models[:valid_count]
             return True
             
         return False
 
     def _save_ensemble(self) -> None:
-        """Saves the current model state to disk with a timestamped filename."""
+        '''Save weights and models.'''
         self.timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"models/{self.dataset_name}/{self.timestamp}.joblib"
+        save_dir = Path(f"models/{self.dataset_name}")
+        save_dir.mkdir(parents=True, exist_ok=True)
         
-        model_data = {
-            "weights": self.weights,
-            "models": self.models
-        }
-        joblib.dump(model_data, filename)
+        filename = save_dir / f"{self.timestamp}.joblib"
+        joblib.dump({"weights": self.weights, "models": self.models}, filename)
+        logger.info(f"Model saved to {filename}")
 
     def _update_registry(self):
-        try:
-            with open('data.json', 'r') as file:
-                registry = json.load(file)
-        except (json.JSONDecodeError, FileNotFoundError):
-            registry = {}
-        
-        if self.dataset_name not in registry:
-            registry[self.dataset_name] = self.timestamp
-        
-        with open("models/registry.json", 'w', encoding='utf-8') as file:
-            json.dump(registry, file, indent=4)
+        """Updates the registry if the current model outperforms the previous best."""
+        registry_path = Path("models/registry.json")
+        registry = {}
 
-    def run(
-        self,
-        dataset: str,
-        target: str,
-        weak_learner: str,
-        upsilon: float,
-        learning_rate: float,
-        patience: int,
-        max_iter: int,
-        **model_params
-    ) -> None:
-        """
-        Executes the Gradient Boosting training loop.
+        registry_path.parent.mkdir(parents=True, exist_ok=True)
 
-        Args:
-            data: Input DataFrame.
-            target: Target column name.
-            weak_learner: Type of learner (e.g., 'decision_tree').
-            upsilon: Subsample fraction.
-            learning_rate: Step size.
-            patience: Early stopping patience.
-            M: Maximum number of iterations.
-            **model_params: Hyperparameters for the weak learner.
-        """
-        self._load_data(dataset=dataset)
-        self._setup_data(target=target)
-        self._setup_weak_learner(weak_learner_name=weak_learner)
+        if registry_path.exists():
+            try:
+                registry = json.loads(registry_path.read_text(encoding='utf-8'))
+            except json.JSONDecodeError:
+                logger.warning("Registry corrupted; initializing new registry.")
+
+        current_record = registry.get(self.dataset_name, {"validation_loss": float('inf')})
+
+        if self.best_val_loss < current_record["validation_loss"]:
+            logger.info(f"New best model found for {self.dataset_name}!")
+            registry[self.dataset_name] = {
+                "best": self.timestamp,
+                "validation_loss": self.best_val_loss
+            }
+            registry_path.write_text(json.dumps(registry, indent=4), encoding='utf-8')
+        else:
+            logger.info("Current run did not beat the existing best model.")
+
+    def run(self, dataset: str, target: str, weak_learner: str, upsilon: float, 
+            learning_rate: float, patience: int, max_iter: int, **model_params) -> None:
+        '''Executes flow.'''
+        self._load_data(dataset, target)
+        self._get_weak_learner(weak_learner)
         self._initialize_model()
 
-        for m in range(max_iter):
-            print(f"Iteration: {m}")
-            self._draw_subsample(upsilon=upsilon)
+        logger.info(f"Starting training: max_iter={max_iter}, lr={learning_rate}, patience={patience}")
+
+        for m in range(max_iter):            
+            self._draw_subsample(upsilon)
             self._compute_pseudo_residuals()
             self._fit_weak_learner(**model_params)
-            self._update_model(learning_rate=learning_rate)
+            self._update_train_preds(learning_rate)
             
-            if self._check_early_stopping(iteration=m, patience=patience):
+            if self._check_early_stopping(m, patience):
                 break
         
         self._save_ensemble()
         self._update_registry()
+        logger.info("Training complete.")
 
 if __name__=="__main__":
     parser = argparse.ArgumentParser(description="Run training on a regression task")
