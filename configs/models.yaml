@@ -1,7 +1,20 @@
 gradient_boosting:
+  train_only: True
+  predict_only: False
   dataset_name: "house_prices"
-  weak_learner: "decision_tree"
+  weak_learner: "neural_network"
   upsilon: 0.8
   learning_rate: 0.01
   patience: 25
   max_iter: 10000
+
+decision_tree:
+  init_params: null
+  fit_params: null
+
+neural_network:
+  init_params: null
+  fit_params:
+    epochs: 1000
+    learning_rate: 0.01
+    patience: 25

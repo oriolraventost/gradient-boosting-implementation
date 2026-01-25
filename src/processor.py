@@ -10,17 +10,14 @@ from sklearn.preprocessing import OneHotEncoder, OrdinalEncoder
 
 from src import RAW_DATA_PATH, PROCESSED_DATA_PATH, DATASETS_CONFIG_PATH
 
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
 class Processor:
     """Handles end-to-end data transformation for Train/Test sets."""
     def __init__(self):
         self.preprocessor: ColumnTransformer | None = None
-        self.logger: logging.getLogger | None = None
-
-    def _setup_logger(self):
-        '''Setup logging configuration.'''
-        self.logger = logging.getLogger(__name__)
-        logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-
+    
     @staticmethod
     def _merge_data(train_data: pd.DataFrame, test_data: pd.DataFrame) -> pd.DataFrame:
         """Concatenates training and test data with a source indicator."""
@@ -60,7 +57,6 @@ class Processor:
         """
         Orchestrates loading, fitting (on train only), transforming, and saving.
         """
-        self._setup_logger()
         raw_path = Path(RAW_DATA_PATH)
         out_path = Path(PROCESSED_DATA_PATH)
         out_path.mkdir(parents=True, exist_ok=True)
@@ -84,7 +80,7 @@ class Processor:
         
         self.preprocessor = self._create_transformer(cat_cols, num_cols, ord_map)
         
-        self.logger.info(f"Fitting preprocessor on {len(train_df)} training samples...")
+        logger.info(f"Fitting preprocessor on {len(train_df)} training samples...")
         self.preprocessor.fit(df[df['is_train']])
         
         processed_df = self.preprocessor.transform(df)
@@ -99,5 +95,5 @@ class Processor:
         train_processed.to_csv(train_out, index=False)
         test_processed.to_csv(test_out, index=False)
 
-        self.logger.info(f"Saved processed train ({train_processed.shape}) to {train_out}")
-        self.logger.info(f"Saved processed test ({test_processed.shape}) to {test_out}")
+        logger.info(f"Saved processed train ({train_processed.shape}) to {train_out}")
+        logger.info(f"Saved processed test ({test_processed.shape}) to {test_out}")

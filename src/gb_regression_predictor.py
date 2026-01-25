@@ -7,6 +7,9 @@ from pathlib import Path
 
 from src import PROCESSED_DATA_PATH, PREDICTIONS_DATA_PATH, MODELS_REGISTRY_PATH
 
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
 class GBRegressionPredictor:
     """
     Loads a trained Gradient Boosting ensemble to make predictions on new data.
@@ -21,18 +24,11 @@ class GBRegressionPredictor:
         self.weights: list[float] | None = None
         self.models: list[object] | None = None
 
-        self.logger: logging.getLogger | None = None
-
-    def _setup_logger(self):
-        '''Setup logging configuration.'''
-        self.logger = logging.getLogger(__name__)
-        logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-
     def _load_data(self, dataset: str) -> None:
         '''Loads inference data.'''
         self.dataset_name = Path(dataset).stem.removesuffix("_test")
         path = Path(f"{PROCESSED_DATA_PATH}/{dataset}")
-        self.logger.info(f"Loading inference data from {path}")
+        logger.info(f"Loading inference data from {path}")
         self.data = pd.read_csv(path)
 
     def _resolve_model_path(self) -> Path:
@@ -42,7 +38,7 @@ class GBRegressionPredictor:
             registry = json.loads(path.read_text(encoding='utf-8'))
             self.timestamp = registry.get(self.dataset_name).get("best")
         except (json.JSONDecodeError, FileNotFoundError):
-            self.logger.error("Registry file not found or corrupted.")
+            logger.error("Registry file not found or corrupted.")
             raise
 
         if not self.timestamp:
@@ -53,7 +49,7 @@ class GBRegressionPredictor:
     def _load_model(self) -> None:
         '''Loads best model.'''
         path = self._resolve_model_path()
-        self.logger.info(f"Loading model from {path}")
+        logger.info(f"Loading model from {path}")
         
         model_data = joblib.load(path)
         self.weights = model_data["weights"]
@@ -61,7 +57,7 @@ class GBRegressionPredictor:
 
     def _predict(self) -> None:
         '''Generates predictions.'''
-        self.logger.info(f"Generating predictions using {len(self.models)} weak learners...")
+        logger.info(f"Generating predictions using {len(self.models)} weak learners...")
 
         self.preds = pd.Series(self.weights[0], index=self.data.index, name="SalePrice")
 
@@ -75,7 +71,7 @@ class GBRegressionPredictor:
         
         output_path = save_dir / f"{self.dataset_name}_preds.csv"
         self.preds.to_csv(output_path, index=False)
-        self.logger.info(f"Predictions saved to {output_path}")
+        logger.info(f"Predictions saved to {output_path}")
 
     def run(self, dataset: str) -> None:
         """
@@ -86,7 +82,6 @@ class GBRegressionPredictor:
             output_name: Optional filename for the output predictions. 
                          Defaults to 'preds_{dataset}'.
         """
-        self._setup_logger()
         self._load_data(dataset)
         self._load_model()
         self._predict()

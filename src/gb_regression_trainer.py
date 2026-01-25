@@ -12,6 +12,10 @@ from typing import Type
 from pathlib import Path
 
 from src import PROCESSED_DATA_PATH, MODELS_REGISTRY_PATH
+from src.nn_regressor import NNRegressor
+
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class GBRegressionTrainer:
     """
@@ -38,18 +42,11 @@ class GBRegressionTrainer:
         self.best_val_loss: float = float('inf')
         self.best_iteration: int = 0
 
-        self.logger: logging.getLogger | None = None
-
-    def _setup_logger(self):
-        '''Setup logging configuration.'''
-        self.logger = logging.getLogger(__name__)
-        logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-
     def _load_data(self, dataset: str, target: str, test_size: float = 0.2) -> None:
         '''Load data and split into train/test.'''
         self.dataset_name = Path(dataset).stem.removesuffix("_train")
         path = Path(PROCESSED_DATA_PATH) / dataset
-        self.logger.info(f"Loading data from {path}")
+        logger.info(f"Loading data from {path}")
         data = pd.read_csv(path)
         X = data.drop(columns=[target])
         y = data[target]
@@ -57,11 +54,18 @@ class GBRegressionTrainer:
         self.X_train, self.X_val, self.y_train, self.y_val = train_test_split(
             X, y, test_size=test_size, random_state=42
         )
-        self.logger.info(f"Data split: {len(self.X_train)} train, {len(self.X_val)} validation samples.")
+        logger.info(f"Data split: {len(self.X_train)} train, {len(self.X_val)} validation samples.")
 
     def _get_weak_learner(self, weak_learner_name: str) -> None:
         '''Setup weak learner class.'''
-        self.weak_learner_class = DecisionTreeRegressor
+        if weak_learner_name == "decision_tree": 
+            self.weak_learner_class = DecisionTreeRegressor
+        
+        elif weak_learner_name == "neural_network":
+            self.weak_learner_class = NNRegressor
+        
+        else:
+            logger.error("Weak learner can only be decision tree or neural network.")
 
     def _initialize_model(self) -> None:
         """Initializes model with mean target value."""
@@ -71,7 +75,7 @@ class GBRegressionTrainer:
         
         self.best_val_loss = float('inf')
         self.best_iteration = 0
-        self.logger.info(f"Model initialized with mean: {y_mean:.4f}")
+        logger.info(f"Model initialized with mean: {y_mean:.4f}")
 
     def _draw_subsample(self, upsilon: float) -> None:
         """Stochastic subsampling of training indices."""
@@ -92,11 +96,17 @@ class GBRegressionTrainer:
         residuals = - self._derivative_mean_squared_error(y=y_sub, y_preds=preds_sub)
         self.pseudo_residuals = pd.Series(residuals, index=self.X_train.index[self.subsample_idx])
 
-    def _fit_weak_learner(self, **kwargs) -> None:
+    def _fit_weak_learner(self, init_params: dict | None = None, fit_params: dict | None = None) -> None:
         '''Fits weak learner on pseudo-residuals.'''
+        init_params = init_params or {}
+        fit_params = fit_params or {}
+
         X_sub = self.X_train.iloc[self.subsample_idx]
-        model = self.weak_learner_class(**kwargs)
-        model.fit(X_sub, self.pseudo_residuals)
+        if self.weak_learner_class == NNRegressor:
+            init_params["input_size"] = X_sub.shape[1]
+
+        model = self.weak_learner_class(**init_params)
+        model.fit(X_sub, self.pseudo_residuals, **fit_params)
         self.models.append(model)
 
     def _update_train_preds(self, learning_rate: float) -> None:
@@ -112,16 +122,16 @@ class GBRegressionTrainer:
             val_preds += weight * model.predict(self.X_val)
 
         current_loss = mean_squared_error(y_true=self.y_val, y_pred=val_preds)
-        self.logger.info(f"Iteration: {iteration} | Validation loss: {current_loss:.4f}")
+        logger.info(f"Iteration: {iteration} | Validation loss: {current_loss:.4f}")
 
         if current_loss < self.best_val_loss:
             self.best_val_loss = current_loss
             self.best_iteration = iteration
-            self.logger.debug(f"New best validation loss: {current_loss:.4f} at iter {iteration}")
+            logger.debug(f"New best validation loss: {current_loss:.4f} at iter {iteration}")
             return False
         
         if iteration - self.best_iteration >= patience:
-            self.logger.info(f"Early stopping triggered at iteration {iteration}. Best iter: {self.best_iteration}")
+            logger.info(f"Early stopping triggered at iteration {iteration}. Best iter: {self.best_iteration}")
             valid_count = self.best_iteration
             self.weights = self.weights[:valid_count + 1]
             self.models = self.models[:valid_count]
@@ -137,7 +147,7 @@ class GBRegressionTrainer:
         
         filename = save_dir / f"{self.timestamp}.joblib"
         joblib.dump({"weights": self.weights, "models": self.models}, filename)
-        self.logger.info(f"Model saved to {filename}")
+        logger.info(f"Model saved to {filename}")
 
     def _update_registry(self):
         """Updates the registry if the current model outperforms the previous best."""
@@ -150,34 +160,33 @@ class GBRegressionTrainer:
             try:
                 registry = json.loads(path.read_text(encoding='utf-8'))
             except json.JSONDecodeError:
-                self.logger.warning("Registry corrupted; initializing new registry.")
+                logger.warning("Registry corrupted; initializing new registry.")
 
         current_record = registry.get(self.dataset_name, {"validation_loss": float('inf')})
 
         if self.best_val_loss < current_record["validation_loss"]:
-            self.logger.info(f"New best model found for {self.dataset_name}!")
+            logger.info(f"New best model found for {self.dataset_name}!")
             registry[self.dataset_name] = {
                 "best": self.timestamp,
                 "validation_loss": self.best_val_loss
             }
             path.write_text(json.dumps(registry, indent=4), encoding='utf-8')
         else:
-            self.logger.info("Current run did not beat the existing best model.")
+            logger.info("Current run did not beat the existing best model.")
 
-    def run(self, dataset: str, target: str, weak_learner: str, upsilon: float, 
-            learning_rate: float, patience: int, max_iter: int, **model_params) -> None:
+    def run(self, dataset: str, target: str, weak_learner: str, upsilon: float, learning_rate: float,
+            patience: int, max_iter: int, init_params: dict | None, fit_params: dict | None) -> None:
         '''Executes flow.'''
-        self._setup_logger()
         self._load_data(dataset, target)
         self._get_weak_learner(weak_learner)
         self._initialize_model()
 
-        self.logger.info(f"Starting training: max_iter={max_iter}, lr={learning_rate}, patience={patience}")
+        logger.info(f"Starting training: max_iter={max_iter}, lr={learning_rate}, patience={patience}")
 
         for m in range(max_iter):            
             self._draw_subsample(upsilon)
             self._compute_pseudo_residuals()
-            self._fit_weak_learner(**model_params)
+            self._fit_weak_learner(init_params, fit_params)
             self._update_train_preds(learning_rate)
             
             if self._check_early_stopping(m, patience):
@@ -185,4 +194,4 @@ class GBRegressionTrainer:
         
         self._save_ensemble()
         self._update_registry()
-        self.logger.info("Training complete.")
+        logger.info("Training complete.")
