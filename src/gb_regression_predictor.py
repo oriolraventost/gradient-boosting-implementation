@@ -1,15 +1,13 @@
 import joblib
 import json
 import logging
-import argparse
 import pandas as pd
 
 from pathlib import Path
 
-logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+from src import PROCESSED_DATA_PATH, PREDICTIONS_DATA_PATH, MODELS_REGISTRY_PATH
 
-class GradientBoostingRegressionPredictor:
+class GBRegressionPredictor:
     """
     Loads a trained Gradient Boosting ensemble to make predictions on new data.
     """
@@ -23,21 +21,28 @@ class GradientBoostingRegressionPredictor:
         self.weights: list[float] | None = None
         self.models: list[object] | None = None
 
+        self.logger: logging.getLogger | None = None
+
+    def _setup_logger(self):
+        '''Setup logging configuration.'''
+        self.logger = logging.getLogger(__name__)
+        logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
     def _load_data(self, dataset: str) -> None:
         '''Loads inference data.'''
         self.dataset_name = Path(dataset).stem.removesuffix("_test")
-        path = Path(f"data/processed/{dataset}")
-        logger.info(f"Loading inference data from {path}")
+        path = Path(f"{PROCESSED_DATA_PATH}/{dataset}")
+        self.logger.info(f"Loading inference data from {path}")
         self.data = pd.read_csv(path)
 
     def _resolve_model_path(self) -> Path:
         """Retrieves the latest timestamp for the dataset from the registry."""
-        registry_path = Path("models/registry.json")
         try:
-            registry = json.loads(registry_path.read_text(encoding='utf-8'))
+            path = Path(MODELS_REGISTRY_PATH)
+            registry = json.loads(path.read_text(encoding='utf-8'))
             self.timestamp = registry.get(self.dataset_name).get("best")
         except (json.JSONDecodeError, FileNotFoundError):
-            logger.error("Registry file not found or corrupted.")
+            self.logger.error("Registry file not found or corrupted.")
             raise
 
         if not self.timestamp:
@@ -48,7 +53,7 @@ class GradientBoostingRegressionPredictor:
     def _load_model(self) -> None:
         '''Loads best model.'''
         path = self._resolve_model_path()
-        logger.info(f"Loading model from {path}")
+        self.logger.info(f"Loading model from {path}")
         
         model_data = joblib.load(path)
         self.weights = model_data["weights"]
@@ -56,7 +61,7 @@ class GradientBoostingRegressionPredictor:
 
     def _predict(self) -> None:
         '''Generates predictions.'''
-        logger.info(f"Generating predictions using {len(self.models)} weak learners...")
+        self.logger.info(f"Generating predictions using {len(self.models)} weak learners...")
 
         self.preds = pd.Series(self.weights[0], index=self.data.index, name="SalePrice")
 
@@ -65,12 +70,12 @@ class GradientBoostingRegressionPredictor:
 
     def _save_preds(self) -> None:
         '''Saves predictions'''
-        save_dir = Path("data/predictions")
+        save_dir = Path(PREDICTIONS_DATA_PATH)
         save_dir.mkdir(parents=True, exist_ok=True)
         
         output_path = save_dir / f"{self.dataset_name}_preds.csv"
         self.preds.to_csv(output_path, index=False)
-        logger.info(f"Predictions saved to {output_path}")
+        self.logger.info(f"Predictions saved to {output_path}")
 
     def run(self, dataset: str) -> None:
         """
@@ -81,19 +86,8 @@ class GradientBoostingRegressionPredictor:
             output_name: Optional filename for the output predictions. 
                          Defaults to 'preds_{dataset}'.
         """
+        self._setup_logger()
         self._load_data(dataset)
         self._load_model()
         self._predict()
         self._save_preds()
-
-if __name__=="__main__":
-    parser = argparse.ArgumentParser(description="Run training on a regression task")
-
-    parser.add_argument("--dataset", type=str, required=True)
-
-    args = parser.parse_args()
-
-    gradient_boosting_regression_predictor = GradientBoostingRegressionPredictor()
-    gradient_boosting_regression_predictor.run(
-        dataset=args.dataset
-    )

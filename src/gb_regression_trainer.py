@@ -1,6 +1,4 @@
-import os
 import json
-import argparse
 import logging
 import joblib
 import numpy as np
@@ -13,13 +11,9 @@ from sklearn.metrics import mean_squared_error
 from typing import Type
 from pathlib import Path
 
-from src.gradient_boosting import WEAK_LEARNERS_MAP
-from src.gradient_boosting.utils import derivative_mean_squared_error
+from src import PROCESSED_DATA_PATH, MODELS_REGISTRY_PATH
 
-logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-
-class GradientBoostingRegressionTrainer:
+class GBRegressionTrainer:
     """
     Gradient Boosting Regressor supporting subsampling and early stopping 
     on a validation set.
@@ -44,11 +38,18 @@ class GradientBoostingRegressionTrainer:
         self.best_val_loss: float = float('inf')
         self.best_iteration: int = 0
 
+        self.logger: logging.getLogger | None = None
+
+    def _setup_logger(self):
+        '''Setup logging configuration.'''
+        self.logger = logging.getLogger(__name__)
+        logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
     def _load_data(self, dataset: str, target: str, test_size: float = 0.2) -> None:
         '''Load data and split into train/test.'''
         self.dataset_name = Path(dataset).stem.removesuffix("_train")
-        path = Path("data/processed") / dataset
-        logger.info(f"Loading data from {path}")
+        path = Path(PROCESSED_DATA_PATH) / dataset
+        self.logger.info(f"Loading data from {path}")
         data = pd.read_csv(path)
         X = data.drop(columns=[target])
         y = data[target]
@@ -56,11 +57,11 @@ class GradientBoostingRegressionTrainer:
         self.X_train, self.X_val, self.y_train, self.y_val = train_test_split(
             X, y, test_size=test_size, random_state=42
         )
-        logger.info(f"Data split: {len(self.X_train)} train, {len(self.X_val)} validation samples.")
+        self.logger.info(f"Data split: {len(self.X_train)} train, {len(self.X_val)} validation samples.")
 
     def _get_weak_learner(self, weak_learner_name: str) -> None:
         '''Setup weak learner class.'''
-        self.weak_learner_class = WEAK_LEARNERS_MAP[weak_learner_name]
+        self.weak_learner_class = DecisionTreeRegressor
 
     def _initialize_model(self) -> None:
         """Initializes model with mean target value."""
@@ -70,7 +71,7 @@ class GradientBoostingRegressionTrainer:
         
         self.best_val_loss = float('inf')
         self.best_iteration = 0
-        logger.info(f"Model initialized with mean: {y_mean:.4f}")
+        self.logger.info(f"Model initialized with mean: {y_mean:.4f}")
 
     def _draw_subsample(self, upsilon: float) -> None:
         """Stochastic subsampling of training indices."""
@@ -78,12 +79,17 @@ class GradientBoostingRegressionTrainer:
         sample_size = int(upsilon * n)
         self.subsample_idx = np.random.choice(np.arange(n), size=sample_size, replace=False)
 
+    @staticmethod
+    def _derivative_mean_squared_error(y: np.array, y_preds: np.array) -> np.array:
+        """Compute the gradient of the mean squared error loss with respect to predictions."""
+        return 2 * (y_preds - y)
+
     def _compute_pseudo_residuals(self) -> None:
         """Computes residuals for the current subsample."""
         y_sub = self.y_train.values[self.subsample_idx]
         preds_sub = self.train_preds[self.subsample_idx]
         
-        residuals = - derivative_mean_squared_error(y=y_sub, y_preds=preds_sub)
+        residuals = - self._derivative_mean_squared_error(y=y_sub, y_preds=preds_sub)
         self.pseudo_residuals = pd.Series(residuals, index=self.X_train.index[self.subsample_idx])
 
     def _fit_weak_learner(self, **kwargs) -> None:
@@ -106,16 +112,16 @@ class GradientBoostingRegressionTrainer:
             val_preds += weight * model.predict(self.X_val)
 
         current_loss = mean_squared_error(y_true=self.y_val, y_pred=val_preds)
-        logger.info(f"Iteration: {iteration} | Validation loss: {current_loss:.4f}")
+        self.logger.info(f"Iteration: {iteration} | Validation loss: {current_loss:.4f}")
 
         if current_loss < self.best_val_loss:
             self.best_val_loss = current_loss
             self.best_iteration = iteration
-            logger.debug(f"New best validation loss: {current_loss:.4f} at iter {iteration}")
+            self.logger.debug(f"New best validation loss: {current_loss:.4f} at iter {iteration}")
             return False
         
         if iteration - self.best_iteration >= patience:
-            logger.info(f"Early stopping triggered at iteration {iteration}. Best iter: {self.best_iteration}")
+            self.logger.info(f"Early stopping triggered at iteration {iteration}. Best iter: {self.best_iteration}")
             valid_count = self.best_iteration
             self.weights = self.weights[:valid_count + 1]
             self.models = self.models[:valid_count]
@@ -131,41 +137,42 @@ class GradientBoostingRegressionTrainer:
         
         filename = save_dir / f"{self.timestamp}.joblib"
         joblib.dump({"weights": self.weights, "models": self.models}, filename)
-        logger.info(f"Model saved to {filename}")
+        self.logger.info(f"Model saved to {filename}")
 
     def _update_registry(self):
         """Updates the registry if the current model outperforms the previous best."""
-        registry_path = Path("models/registry.json")
         registry = {}
+        
+        path = Path(MODELS_REGISTRY_PATH)
+        path.parent.mkdir(parents=True, exist_ok=True)
 
-        registry_path.parent.mkdir(parents=True, exist_ok=True)
-
-        if registry_path.exists():
+        if path.exists():
             try:
-                registry = json.loads(registry_path.read_text(encoding='utf-8'))
+                registry = json.loads(path.read_text(encoding='utf-8'))
             except json.JSONDecodeError:
-                logger.warning("Registry corrupted; initializing new registry.")
+                self.logger.warning("Registry corrupted; initializing new registry.")
 
         current_record = registry.get(self.dataset_name, {"validation_loss": float('inf')})
 
         if self.best_val_loss < current_record["validation_loss"]:
-            logger.info(f"New best model found for {self.dataset_name}!")
+            self.logger.info(f"New best model found for {self.dataset_name}!")
             registry[self.dataset_name] = {
                 "best": self.timestamp,
                 "validation_loss": self.best_val_loss
             }
-            registry_path.write_text(json.dumps(registry, indent=4), encoding='utf-8')
+            path.write_text(json.dumps(registry, indent=4), encoding='utf-8')
         else:
-            logger.info("Current run did not beat the existing best model.")
+            self.logger.info("Current run did not beat the existing best model.")
 
     def run(self, dataset: str, target: str, weak_learner: str, upsilon: float, 
             learning_rate: float, patience: int, max_iter: int, **model_params) -> None:
         '''Executes flow.'''
+        self._setup_logger()
         self._load_data(dataset, target)
         self._get_weak_learner(weak_learner)
         self._initialize_model()
 
-        logger.info(f"Starting training: max_iter={max_iter}, lr={learning_rate}, patience={patience}")
+        self.logger.info(f"Starting training: max_iter={max_iter}, lr={learning_rate}, patience={patience}")
 
         for m in range(max_iter):            
             self._draw_subsample(upsilon)
@@ -178,28 +185,4 @@ class GradientBoostingRegressionTrainer:
         
         self._save_ensemble()
         self._update_registry()
-        logger.info("Training complete.")
-
-if __name__=="__main__":
-    parser = argparse.ArgumentParser(description="Run training on a regression task")
-
-    parser.add_argument("--dataset", type=str, required=True)
-    parser.add_argument("--target", type=str, required=True)
-    parser.add_argument("--weak_learner", type=str, required=True)
-    parser.add_argument("--upsilon", type=float, required=True)
-    parser.add_argument("--learning_rate", type=float, required=True)
-    parser.add_argument("--patience", type=int, required=True)
-    parser.add_argument("--max_iter", type=int, required=True)
-
-    args = parser.parse_args()
-
-    gradient_boosting_regression_trainer = GradientBoostingRegressionTrainer()
-    gradient_boosting_regression_trainer.run(
-        dataset=args.dataset,
-        target=args.target,
-        weak_learner=args.weak_learner,
-        upsilon=args.upsilon,
-        learning_rate=args.learning_rate,
-        patience=args.patience,
-        max_iter=args.max_iter
-    )
+        self.logger.info("Training complete.")

@@ -1,0 +1,7 @@
+gradient_boosting:
+  dataset_name: "house_prices"
+  weak_learner: "decision_tree"
+  upsilon: 0.8
+  learning_rate: 0.01
+  patience: 25
+  max_iter: 10000
