@@ -46,7 +46,7 @@ def main():
         processed_train_data = pd.read_csv(processed_train_data_path)
         processed_test_data = pd.read_csv(processed_test_data_path)
 
-    gradient_boosting_model = GBRegressor(weak_learner_key=gb_config["weak_learner"])
+    gradient_boosting_model = GBRegressor(weak_learner_key=gb_config["weak_learner"], dataset_config=dataset_config)
 
     if main_config["train"]:
         X_train, X_valid, y_train, y_valid = train_test_split(
@@ -64,8 +64,8 @@ def main():
                 learning_rate=gb_config["learning_rate"],
                 patience=gb_config["patience"],
                 max_iter=gb_config["max_iter"],
-                init_params=weak_learner_config["init_params"],
-                fit_params=weak_learner_config["fit_params"]
+                init_params=weak_learner_config["init_params"] or {},
+                fit_params=weak_learner_config["fit_params"] or {}
             )
             
             timestamp = datetime.now()

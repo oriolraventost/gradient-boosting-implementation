@@ -4,9 +4,7 @@ import pandas as pd
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
 from sklearn.impute import SimpleImputer
-from sklearn.preprocessing import OrdinalEncoder, StandardScaler, FunctionTransformer
-
-from src.utils import shift_plus_one
+from sklearn.preprocessing import OrdinalEncoder, StandardScaler
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')

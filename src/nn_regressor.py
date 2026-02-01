@@ -33,21 +33,20 @@ class NNRegressor(nn.Module):
             nn.ReLU(),
             nn.Dropout(0.3),
 
-            nn.Linear(512, 256),
-            nn.BatchNorm1d(256),
+            nn.Linear(512, 512),
+            nn.BatchNorm1d(512),
             nn.ReLU(),
             nn.Dropout(0.3),
 
-            nn.Linear(256, 128),
-            nn.BatchNorm1d(128),
+            nn.Linear(512, 512),
+            nn.BatchNorm1d(512),
             nn.ReLU(),
             nn.Dropout(0.3),
 
-            nn.Linear(128, 1)
+            nn.Linear(512, 1)
         )
         
-        # self.device: torch.device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-        self.device: torch.device = torch.device("cpu")
+        self.device: torch.device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
         self.to(self.device)
 
     def _prepare_loaders(self, X: pd.DataFrame, y: pd.Series, batch_size: int = 2**10, train_split: float = 0.8):

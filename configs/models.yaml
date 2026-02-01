@@ -2,8 +2,8 @@ gradient_boosting:
   weak_learner: "neural_network"
   upsilon: 0.8
   learning_rate: 0.01
-  patience: 10
-  max_iter: 5
+  patience: 3
+  max_iter: 20
 
 decision_tree:
   init_params:

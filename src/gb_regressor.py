@@ -17,8 +17,9 @@ class GBRegressor:
     Gradient Boosting Regressor supporting subsampling and early stopping 
     on a validation set.
     """
-    def __init__(self, weak_learner_key: str,):
+    def __init__(self, weak_learner_key: str, dataset_config: dict):
         self.weak_learner_key: str = weak_learner_key
+        self.dataset_config = dataset_config
         
         self.weights: list[float] = []
         self.weak_learners: list[object] = []
@@ -36,8 +37,8 @@ class GBRegressor:
         learning_rate: float,
         patience: int,
         max_iter: int,
-        init_params: dict | None,
-        fit_params: dict | None
+        init_params: dict = {},
+        fit_params: dict = {}
     ) -> None:
         '''Executes flow.'''
         initial_constant = self._compute_initial_constant(y_train)
@@ -104,7 +105,12 @@ class GBRegressor:
 
     def _get_weak_learner(self, init_params: dict = {}) -> DecisionTreeRegressor | NNRegressor:
         if self.weak_learner_key == "neural_network":
-            return NNRegressor(**init_params)
+            return NNRegressor(
+                cat_cols=self.dataset_config["cat_cols"],
+                num_cols=self.dataset_config["num_cols"],
+                cat_cardinalities=self.dataset_config["cat_cardinalities"],
+                **init_params
+            )
         
         elif self.weak_learner_key == "decision_tree":
             return DecisionTreeRegressor(**init_params)
