@@ -1,100 +1,44 @@
 import logging
-import yaml
 import pandas as pd
 
-from pathlib import Path
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
 from sklearn.impute import SimpleImputer
-from sklearn.preprocessing import OrdinalEncoder, StandardScaler
+from sklearn.preprocessing import OrdinalEncoder, StandardScaler, FunctionTransformer
 
-from src import RAW_DATA_PATH, PROCESSED_DATA_PATH, DATASETS_CONFIG_PATH
+from src.utils import shift_plus_one
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class Processor:
     """Handles end-to-end data transformation for Train/Test sets."""
-    def __init__(self):
-        self.preprocessor: ColumnTransformer | None = None
-    
-    @staticmethod
-    def _merge_data(train_data: pd.DataFrame, test_data: pd.DataFrame) -> pd.DataFrame:
-        """Concatenates training and test data with a source indicator."""
-        return pd.concat([
-            train_data.assign(is_train=True),
-            test_data.assign(is_train=False)
-        ], axis=0, ignore_index=True)
-
-    @staticmethod
-    def _setup_columns(data: pd.DataFrame, target: str, id_column: str):
-        """Dynamically categorizes columns excluding special utility columns."""
-        exclude = {target, id_column, 'is_train'}
+    def __init__(self, dataset_config: dict):
+        self.target: str = dataset_config["target"]
         
-        cat_cols = [c for c in data.select_dtypes(include=['object', 'bool']).columns 
-                   if c not in exclude]
-        
-        num_cols = [c for c in data.select_dtypes(exclude=['object', 'bool']).columns 
-                   if c not in exclude]
-                   
-        return cat_cols, num_cols
-
-    def _create_transformer(self, cat_cols: list, num_cols: list) -> ColumnTransformer:
-        """Constructs the Scikit-Learn transformer."""
-        return ColumnTransformer(
+        self.transformer: ColumnTransformer = ColumnTransformer(
             transformers=[
                 ('num', Pipeline([
                     ('impute', SimpleImputer(strategy='median')),
                     ('scale', StandardScaler())
-                ]), num_cols),
+                ]), dataset_config["num_cols"]),
                 ('ord', Pipeline([
                     ('impute', SimpleImputer(strategy='constant', fill_value='NA')),
-                    ('encode', OrdinalEncoder(handle_unknown='use_encoded_value', unknown_value=-1))
-                ]), cat_cols),
+                    ('encode', OrdinalEncoder())
+                ]), dataset_config["cat_cols"]),
             ],
             verbose_feature_names_out=False
         ).set_output(transform="pandas")
 
-    def run(self, train_file: str, test_file: str) -> None:
+    def run(self, train_data: pd.DataFrame, test_data: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
         """
-        Orchestrates loading, fitting (on train only), transforming, and saving.
+        Orchestrates fitting (on train only) and transforming.
         """
-        raw_path = Path(RAW_DATA_PATH)
-        out_path = Path(PROCESSED_DATA_PATH)
-        out_path.mkdir(parents=True, exist_ok=True)
-
-        train_df = pd.read_csv(raw_path / train_file)
-        test_df = pd.read_csv(raw_path / test_file)
+        logger.info(f"Fitting preprocessor on {len(train_data)} training samples...")
         
-        dataset_name = Path(train_file).stem.replace("_train", "")
-        with open(DATASETS_CONFIG_PATH, 'r') as file:
-            meta = yaml.safe_load(file)
+        processed_train_data = self.transformer.fit_transform(train_data)
+        processed_train_data[self.target] = train_data[self.target]
         
-        if not meta:
-            raise ValueError(f"No metadata found for dataset: {dataset_name}")
+        processed_test_data = self.transformer.transform(test_data)
 
-        target = meta[dataset_name]["target"]
-        id_col = meta[dataset_name]["id_column"]
-
-        df = self._merge_data(train_df, test_df)
-        cat_cols, num_cols = self._setup_columns(df, target, id_col)
-        
-        self.preprocessor = self._create_transformer(cat_cols, num_cols)
-        
-        logger.info(f"Fitting preprocessor on {len(train_df)} training samples...")
-        self.preprocessor.fit(df[df['is_train']])
-        
-        processed_df = self.preprocessor.transform(df)
-        processed_df[target] = df[target]
-
-        train_processed = processed_df[df['is_train']]
-        test_processed = processed_df[~df['is_train']].drop(columns=[target])
-
-        train_out = out_path / train_file
-        test_out = out_path / test_file
-
-        train_processed.to_csv(train_out, index=False)
-        test_processed.to_csv(test_out, index=False)
-
-        logger.info(f"Saved processed train ({train_processed.shape}) to {train_out}")
-        logger.info(f"Saved processed test ({test_processed.shape}) to {test_out}")
+        return processed_train_data, processed_test_data

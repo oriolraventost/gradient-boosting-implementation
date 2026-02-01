@@ -1,87 +1,143 @@
 import pandas as pd
 import yaml
+import json
 
+from datetime import datetime
 from pathlib import Path
 from sklearn.tree import DecisionTreeRegressor
 from sklearn.metrics import mean_squared_error
 from sklearn.model_selection import train_test_split
 
-from src import PROCESSED_DATA_PATH
+from src import RAW_DATA_PATH, PROCESSED_DATA_PATH, MODELS_REGISTRY_PATH, PREDICTIONS_DATA_PATH
 from src.processor import Processor
 from src.nn_regressor import NNRegressor
 from src.gb_regressor import GBRegressor
 
 def main():
     '''Main workflow with validated baseline comparison.'''
-    with open("configs/models.yaml", "r") as f:
-        models_config = yaml.safe_load(f)
-    
-    main_config = models_config["main"]
-    gb_config = models_config["gradient_boosting"]
+    with open("configs/main.yaml", "r") as f:
+        main_config = yaml.safe_load(f)
     
     with open("configs/datasets.yaml", "r") as f:
         dataset_config = yaml.safe_load(f)[main_config["dataset_name"]]
 
-    train_filename = f"{main_config['dataset_name']}_train.csv"
-    test_filename = f"{main_config['dataset_name']}_test.csv"
-    train_path = Path(PROCESSED_DATA_PATH) / train_filename
+    with open("configs/models.yaml", "r") as f:
+        models_config = yaml.safe_load(f)
     
-    if not train_path.exists():
-        processor = Processor()
-        processor.run(train_filename, test_filename)
+    gb_config = models_config["gradient_boosting"]
 
-    df_train = pd.read_csv(train_path)
-    X_full = df_train.drop(columns=[dataset_config["target"]])
-    y_full = df_train[dataset_config["target"]]
+    raw_train_data_path = Path(RAW_DATA_PATH) / f"{main_config['dataset_name']}_train.csv"
+    raw_test_data_path = Path(RAW_DATA_PATH) / f"{main_config['dataset_name']}_test.csv"
 
-    if not main_config["predict_only"]:
+    processed_train_data_path = Path(PROCESSED_DATA_PATH) / f"{main_config['dataset_name']}_train.csv"
+    processed_test_data_path = Path(PROCESSED_DATA_PATH) / f"{main_config['dataset_name']}_test.csv"
+    
+    raw_train_data = pd.read_csv(raw_train_data_path, index_col=dataset_config["id_column"])
+    raw_test_data = pd.read_csv(raw_test_data_path, index_col=dataset_config["id_column"])
+
+    if main_config["preprocess"]:
+        processor = Processor(dataset_config)
+        processed_train_data, processed_test_data = processor.run(raw_train_data, raw_test_data)
+
+        processed_train_data.to_csv(processed_train_data_path, index=False)
+        processed_test_data.to_csv(processed_test_data_path, index=False)
+    
+    else:
+        processed_train_data = pd.read_csv(processed_train_data_path)
+        processed_test_data = pd.read_csv(processed_test_data_path)
+
+    gradient_boosting_model = GBRegressor(weak_learner_key=gb_config["weak_learner"])
+
+    if main_config["train"]:
+        X_train, X_valid, y_train, y_valid = train_test_split(
+            processed_train_data.drop(columns=[dataset_config["target"]]), 
+            processed_train_data[dataset_config["target"]],
+            test_size=0.2
+        )
+        
         if main_config["use_gradient_boosting"]:
             weak_learner_config = models_config[gb_config["weak_learner"]]
-            trainer = GBRegressionTrainer()
-            trainer.run(
-                train_filename,
-                dataset_config["target"],
-                gb_config["weak_learner"],
-                gb_config["upsilon"],
-                gb_config["learning_rate"],
-                gb_config["patience"],
-                gb_config["max_iter"],
+            
+            gradient_boosting_model.fit(
+                X_train, y_train, X_valid, y_valid,
+                upsilon=gb_config["upsilon"],
+                learning_rate=gb_config["learning_rate"],
+                patience=gb_config["patience"],
+                max_iter=gb_config["max_iter"],
                 init_params=weak_learner_config["init_params"],
                 fit_params=weak_learner_config["fit_params"]
             )
+            
+            timestamp = datetime.now()
+            formatted_timestamp = timestamp.strftime("%Y_%m_%d_%H_%M")
+            gradient_boosting_model.save_model(f"models/{main_config['dataset_name']}/{formatted_timestamp}.joblib")
+
+            try:
+                with open(MODELS_REGISTRY_PATH, 'r') as file:
+                    registry = json.load(file)
+            
+            except (json.JSONDecodeError, FileNotFoundError):
+                registry = {}
+            
+            current_best_loss = registry.get(main_config["dataset_name"], {}).get(gb_config["weak_learner"], {}).get("validation_loss", float('inf'))
+            if gradient_boosting_model.best_loss < current_best_loss:
+                registry.setdefault(main_config["dataset_name"], {})[gb_config["weak_learner"]] = {
+                    "best": formatted_timestamp,
+                    "validation_loss": gradient_boosting_model.best_loss
+                }
+            
+            with open("models/registry.json", 'w', encoding='utf-8') as file:
+                json.dump(registry, file, indent=4)
+        
         else:
             print("--- Executing Standalone Baseline Training ---")
             
-            X_train, X_val, y_train, y_val = train_test_split(X_full, y_full, test_size=0.2)
+            nn_init_params = models_config["neural_network"]["init_params"] or {}
+            nn_fit_params = models_config["neural_network"]["fit_params"] or {}
+            
+            nn_model = NNRegressor(
+                cat_cols=dataset_config["cat_cols"],
+                num_cols=dataset_config["num_cols"],
+                cat_cardinalities=dataset_config["cat_cardinalities"],
+                **nn_init_params
+            )
 
-            print(len(X_train))
+            nn_model.fit(X_train, y_train, **nn_fit_params )
+            nn_val_mse = mean_squared_error(y_valid, nn_model.predict(X_valid))
 
             dt_init_params = models_config["decision_tree"]["init_params"] or {}
             dt_fit_params = models_config["decision_tree"]["fit_params"] or {}
+            
             dt_model = DecisionTreeRegressor(**dt_init_params)
             dt_model.fit(X_train, y_train, **dt_fit_params)
-            dt_val_mse = mean_squared_error(y_val, dt_model.predict(X_val))
-            
-            nn_fit_params = models_config["neural_network"]["fit_params"] or {}
-            nn_model = NNRegressor(input_size=X_train.shape[1])
-            nn_model.fit(
-                X_train, y_train, 
-                epochs=nn_fit_params["epochs"], 
-                learning_rate=nn_fit_params["learning_rate"],
-                patience=nn_fit_params["patience"]
-            )
-            nn_val_mse = mean_squared_error(y_val, nn_model.predict(X_val))
+            dt_val_mse = mean_squared_error(y_valid, dt_model.predict(X_valid))
 
-            print("\n" + "="*30)
-            print(f"{'Model':<20} | {'Validation MSE':<10}")
-            print("-" * 35)
+            print(f"\n{'Model':<20} | {'Validation MSE':<10}\n" + "-"*35)
             print(f"{'Decision Tree':<20} | {dt_val_mse:.6f}")
-            print(f"{'Neural Network':<20} | {nn_val_mse:.6f}")
-            print("="*30 + "\n")
+            print(f"{'Neural Network':<20} | {nn_val_mse:.6f}\n")
 
-    if not main_config["train_only"]:
-        predictor = GBRegressionPredictor()
-        predictor.run(test_filename)
+    if main_config["predict"]:
+        if main_config["train"]:
+            preds = gradient_boosting_model.predict(processed_test_data)
+        else:
+            try:
+                with open(MODELS_REGISTRY_PATH, 'r') as file:
+                    registry = json.load(file)
+            
+            except (json.JSONDecodeError, FileNotFoundError):
+                registry = {}
+            
+            best_model_filename = registry.get(main_config["dataset_name"], {}).get(gb_config["weak_learner"], {}).get("best")
+            best_model_path = Path(PROCESSED_DATA_PATH) / main_config['dataset_name'] / best_model_filename
+            
+            gradient_boosting_model = GBRegressor(weak_learner_key=gb_config["weak_learner"])
+
+            gradient_boosting_model.load_model(best_model_path)
+            gradient_boosting_model.predict(processed_test_data)
+        
+        output_path = Path(PREDICTIONS_DATA_PATH) / f"{main_config['dataset_name']}_preds.csv"
+        preds.to_csv(output_path, index=False)
+        print(f"Predictions saved to {output_path}")
 
 if __name__=="__main__":
     main()

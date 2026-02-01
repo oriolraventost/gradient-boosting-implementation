@@ -1,48 +1,62 @@
 import numpy as np
 import pandas as pd
+import logging
+import copy
 import torch
 import torch.nn as nn
 import torch.optim as optim
+
 from torch.utils.data import DataLoader, TensorDataset, random_split
-import logging
-import copy
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class NNRegressor(nn.Module):
     """
-    A professional, lean-constructor PyTorch regressor.
+    A PyTorch neural network regressor.
     """
-    def __init__(self, input_size: int):
+    def __init__(self, cat_cols: list[str], num_cols: list[str], cat_cardinalities: list[int]):
         super().__init__()
-        self.device: torch.device = self._get_device()
-        self.network: nn.Sequential = self._build_network(input_size)
-
-        self.best_model_state: dict = None
         
+        self.cat_cols: list[str] = cat_cols
+        self.num_cols: list[str] = num_cols
+        
+        self.embeddings = nn.ModuleList([
+            nn.Embedding(card + 1, int(np.ceil(np.sqrt(card + 1)))) 
+            for card in cat_cardinalities
+        ])
+        
+        input_size = len(num_cols) + sum(int(np.ceil(np.sqrt(card + 1))) for card in cat_cardinalities)
+        self.mlp: nn.Sequential = nn.Sequential(
+            nn.Linear(input_size, 512),
+            nn.BatchNorm1d(512),
+            nn.ReLU(),
+            nn.Dropout(0.3),
+
+            nn.Linear(512, 256),
+            nn.BatchNorm1d(256),
+            nn.ReLU(),
+            nn.Dropout(0.3),
+
+            nn.Linear(256, 128),
+            nn.BatchNorm1d(128),
+            nn.ReLU(),
+            nn.Dropout(0.3),
+
+            nn.Linear(128, 1)
+        )
+        
+        # self.device: torch.device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+        self.device: torch.device = torch.device("cpu")
         self.to(self.device)
 
-    def _get_device(self) -> torch.device:
-        """Determines the best available hardware accelerator."""
-        if torch.cuda.is_available():
-            return torch.device("cuda")
-        return torch.device("cpu")
-
-    def _build_network(self, input_size: int) -> nn.Sequential:
-        """Defines the model architecture separately to keep __init__ clean."""
-        return nn.Sequential(
-            nn.Linear(input_size, input_size),
-            nn.ReLU(),
-            nn.Linear(input_size, 1)
-        )
-
-    def _prepare_loaders(self, X: pd.DataFrame, y: pd.Series, batch_size: int = 32, train_split: float = 0.8):
+    def _prepare_loaders(self, X: pd.DataFrame, y: pd.Series, batch_size: int = 2**10, train_split: float = 0.8):
         '''Turn pandas data into torch loaders.'''
-        X_tensor = torch.tensor(X.values, dtype=torch.float32)
+        X_nums_tensor = torch.tensor(X[self.num_cols].values, dtype=torch.float32)
+        X_cats_tensor = torch.tensor(X[self.cat_cols].values, dtype=torch.long)
         y_tensor = torch.tensor(y.values.reshape(-1, 1), dtype=torch.float32)
 
-        dataset = TensorDataset(X_tensor, y_tensor)
+        dataset = TensorDataset(X_nums_tensor, X_cats_tensor, y_tensor)
 
         train_size = int(train_split * len(dataset))
         val_size = len(dataset) - train_size
@@ -53,25 +67,35 @@ class NNRegressor(nn.Module):
 
         return train_loader, val_loader
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x_nums: torch.Tensor, x_cats: torch.Tensor) -> torch.Tensor:
         """Standard PyTorch forward pass."""
-        return self.network(x)
+        emb_outputs = []
+        for i, emb_layer in enumerate(self.embeddings):
+            emb_outputs.append(emb_layer(x_cats[:, i]))
+        
+        x = torch.cat(emb_outputs + [x_nums], dim=1)
+        
+        return self.mlp(x)
     
     def fit(
         self, 
         X: pd.DataFrame,
         y: pd.Series,
-        epochs: int, 
         learning_rate: float,
-        patience: int = 10
+        weight_decay: float,
+        epochs: int, 
+        patience: int
     ) -> None:
         """
         Main training loop with validation and early stopping.
         Note: The heavy lifting remains here to keep the logic encapsulated.
         """
+        best_model_state = None
+
         train_loader, val_loader = self._prepare_loaders(X, y)
         criterion = nn.MSELoss()
-        optimizer = optim.Adam(self.parameters(), lr=learning_rate)
+        optimizer = optim.AdamW(self.parameters(), lr=learning_rate, weight_decay=weight_decay)
+        scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=0.1, patience=1)
         
         best_val_loss = float('inf')
         epochs_no_improve = 0
@@ -81,10 +105,10 @@ class NNRegressor(nn.Module):
         for epoch in range(epochs):
             self.train()
             train_loss = 0.0
-            for batch_X, batch_y in train_loader:
-                batch_X, batch_y = batch_X.to(self.device), batch_y.to(self.device)
+            for batch_X_nums, batch_X_cats, batch_y in train_loader:
+                batch_X_nums, batch_X_cats, batch_y = batch_X_nums.to(self.device), batch_X_cats.to(self.device), batch_y.to(self.device)
                 
-                preds = self(batch_X)
+                preds = self(batch_X_nums, batch_X_cats)
                 loss = criterion(preds, batch_y)
                 
                 optimizer.zero_grad()
@@ -95,39 +119,42 @@ class NNRegressor(nn.Module):
             self.eval()
             val_loss = 0.0
             with torch.no_grad():
-                for v_batch_X, v_batch_y in val_loader:
-                    v_batch_X, v_batch_y = v_batch_X.to(self.device), v_batch_y.to(self.device)
-                    v_preds = self(v_batch_X)
+                for v_batch_X_nums, v_batch_X_cats, v_batch_y in val_loader:
+                    v_batch_X_nums, v_batch_X_cats, v_batch_y = v_batch_X_nums.to(self.device), v_batch_X_cats.to(self.device), v_batch_y.to(self.device)
+                    v_preds = self(v_batch_X_nums, v_batch_X_cats)
                     v_loss = criterion(v_preds, v_batch_y)
                     val_loss += v_loss.item()
             
             avg_val = val_loss / len(val_loader)
 
+            scheduler.step(avg_val)
+
             if avg_val < best_val_loss:
                 best_val_loss = avg_val
                 epochs_no_improve = 0
-                self.best_model_state = copy.deepcopy(self.state_dict())
+                best_model_state = copy.deepcopy(self.state_dict())
             else:
                 epochs_no_improve += 1
             
-            if (epoch + 1) % 10 == 0:
-                logger.info(f"Epoch {epoch+1:03d} | Val MSE: {avg_val:.4f}")
+            logger.info(f"Epoch {epoch+1:03d} | Val MSE: {avg_val:.4f}")
 
             if epochs_no_improve >= patience:
                 logger.info("Early stopping triggered.")
                 break
 
-        if self.best_model_state:
-            self.load_state_dict(self.best_model_state)
+        if best_model_state:
+            self.load_state_dict(best_model_state)
             logger.info("Best weights restored.")
 
     def predict(self, X: pd.DataFrame) -> np.ndarray:
         """Generates predictions for the given input data."""
-        X_tensor = torch.tensor(X.values, dtype=torch.float32)
-        X_tensor = X_tensor.to(self.device)
+        X_nums_tensor = torch.tensor(X[self.num_cols].values, dtype=torch.float32)
+        X_cats_tensor = torch.tensor(X[self.cat_cols].values, dtype=torch.long)
+        
+        X_nums_tensor, X_cats_tensor = X_nums_tensor.to(self.device), X_cats_tensor.to(self.device)
 
         self.eval()
         with torch.no_grad():
-            predictions = self.forward(X_tensor)
+            predictions = self.forward(X_nums_tensor, X_cats_tensor)
         
         return predictions.cpu().numpy().ravel()
