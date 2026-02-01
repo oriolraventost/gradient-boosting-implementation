@@ -6,7 +6,7 @@ from pathlib import Path
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
 from sklearn.impute import SimpleImputer
-from sklearn.preprocessing import OneHotEncoder, OrdinalEncoder
+from sklearn.preprocessing import OrdinalEncoder, StandardScaler
 
 from src import RAW_DATA_PATH, PROCESSED_DATA_PATH, DATASETS_CONFIG_PATH
 
@@ -27,28 +27,30 @@ class Processor:
         ], axis=0, ignore_index=True)
 
     @staticmethod
-    def _setup_columns(data: pd.DataFrame, target: str, id_column: str, ordinal_map: dict):
+    def _setup_columns(data: pd.DataFrame, target: str, id_column: str):
         """Dynamically categorizes columns excluding special utility columns."""
         exclude = {target, id_column, 'is_train'}
         
-        cat_cols = [c for c in data.select_dtypes(include=['object']).columns 
-                   if c not in ordinal_map and c not in exclude]
+        cat_cols = [c for c in data.select_dtypes(include=['object', 'bool']).columns 
+                   if c not in exclude]
         
-        num_cols = [c for c in data.select_dtypes(include=['number']).columns 
+        num_cols = [c for c in data.select_dtypes(exclude=['object', 'bool']).columns 
                    if c not in exclude]
                    
         return cat_cols, num_cols
 
-    def _create_transformer(self, cat_cols: list, num_cols: list, ord_map: dict) -> ColumnTransformer:
+    def _create_transformer(self, cat_cols: list, num_cols: list) -> ColumnTransformer:
         """Constructs the Scikit-Learn transformer."""
         return ColumnTransformer(
             transformers=[
-                ('num', SimpleImputer(strategy='median'), num_cols),
+                ('num', Pipeline([
+                    ('impute', SimpleImputer(strategy='median')),
+                    ('scale', StandardScaler())
+                ]), num_cols),
                 ('ord', Pipeline([
                     ('impute', SimpleImputer(strategy='constant', fill_value='NA')),
-                    ('encode', OrdinalEncoder(categories=list(ord_map.values())))
-                ]), list(ord_map.keys())),
-                ('nom', OneHotEncoder(handle_unknown='ignore', sparse_output=False), cat_cols)
+                    ('encode', OrdinalEncoder(handle_unknown='use_encoded_value', unknown_value=-1))
+                ]), cat_cols),
             ],
             verbose_feature_names_out=False
         ).set_output(transform="pandas")
@@ -73,12 +75,11 @@ class Processor:
 
         target = meta[dataset_name]["target"]
         id_col = meta[dataset_name]["id_column"]
-        ord_map = meta[dataset_name].get("ordinal_map", {})
 
         df = self._merge_data(train_df, test_df)
-        cat_cols, num_cols = self._setup_columns(df, target, id_col, ord_map)
+        cat_cols, num_cols = self._setup_columns(df, target, id_col)
         
-        self.preprocessor = self._create_transformer(cat_cols, num_cols, ord_map)
+        self.preprocessor = self._create_transformer(cat_cols, num_cols)
         
         logger.info(f"Fitting preprocessor on {len(train_df)} training samples...")
         self.preprocessor.fit(df[df['is_train']])
