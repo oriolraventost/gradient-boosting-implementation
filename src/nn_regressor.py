@@ -75,75 +75,76 @@ class NNRegressor(nn.Module):
         x = torch.cat(emb_outputs + [x_nums], dim=1)
         
         return self.mlp(x)
-    
+
     def fit(
         self, 
         X: pd.DataFrame,
         y: pd.Series,
         learning_rate: float,
         weight_decay: float,
-        epochs: int, 
-        patience: int
+        epochs: int
     ) -> None:
-        """
-        Main training loop with validation and early stopping.
-        Note: The heavy lifting remains here to keep the logic encapsulated.
-        """
-        best_model_state = None
-
+        """Optimized training using OneCycleLR for fast convergence."""
         train_loader, val_loader = self._prepare_loaders(X, y)
         criterion = nn.MSELoss()
+        
         optimizer = optim.AdamW(self.parameters(), lr=learning_rate, weight_decay=weight_decay)
-        scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=0.1, patience=1)
+        
+        scheduler = optim.lr_scheduler.OneCycleLR(
+            optimizer, 
+            max_lr=learning_rate, 
+            steps_per_epoch=len(train_loader), 
+            epochs=epochs,
+            pct_start=0.3,
+            anneal_strategy='cos'
+        )
         
         best_val_loss = float('inf')
-        epochs_no_improve = 0
+        best_model_state = None
         
-        logger.info(f"Training started on {self.device}")
+        logger.info(f"Starting training for {epochs} epochs on {self.device}.")
 
         for epoch in range(epochs):
             self.train()
             train_loss = 0.0
             for batch_X_nums, batch_X_cats, batch_y in train_loader:
-                batch_X_nums, batch_X_cats, batch_y = batch_X_nums.to(self.device), batch_X_cats.to(self.device), batch_y.to(self.device)
-                
-                preds = self(batch_X_nums, batch_X_cats)
-                loss = criterion(preds, batch_y)
+                batch_X_nums = batch_X_nums.to(self.device)
+                batch_X_cats = batch_X_cats.to(self.device)
+                batch_y = batch_y.to(self.device)
                 
                 optimizer.zero_grad()
+                preds = self(batch_X_nums, batch_X_cats)
+                loss = criterion(preds, batch_y)
                 loss.backward()
                 optimizer.step()
+                
+                scheduler.step()
                 train_loss += loss.item()
 
             self.eval()
             val_loss = 0.0
             with torch.no_grad():
                 for v_batch_X_nums, v_batch_X_cats, v_batch_y in val_loader:
-                    v_batch_X_nums, v_batch_X_cats, v_batch_y = v_batch_X_nums.to(self.device), v_batch_X_cats.to(self.device), v_batch_y.to(self.device)
+                    v_batch_X_nums = v_batch_X_nums.to(self.device)
+                    v_batch_X_cats = v_batch_X_cats.to(self.device)
+                    v_batch_y = v_batch_y.to(self.device)
+                    
                     v_preds = self(v_batch_X_nums, v_batch_X_cats)
                     v_loss = criterion(v_preds, v_batch_y)
                     val_loss += v_loss.item()
             
             avg_val = val_loss / len(val_loader)
-
-            scheduler.step(avg_val)
-
+            
             if avg_val < best_val_loss:
                 best_val_loss = avg_val
-                epochs_no_improve = 0
                 best_model_state = copy.deepcopy(self.state_dict())
-            else:
-                epochs_no_improve += 1
-            
-            logger.info(f"Epoch {epoch+1:03d} | Val MSE: {avg_val:.4f}")
-
-            if epochs_no_improve >= patience:
-                logger.info("Early stopping triggered.")
-                break
+                
+            current_lr = optimizer.param_groups[0]['lr']
+            logger.info(f"Epoch {epoch+1:02d} | Val MSE: {avg_val:.4f} | LR: {current_lr:.6f}")
 
         if best_model_state:
             self.load_state_dict(best_model_state)
-            logger.info("Best weights restored.")
+            logger.info(f"Training complete. Best Val MSE: {best_val_loss:.4f} restored.")
 
     def predict(self, X: pd.DataFrame) -> np.ndarray:
         """Generates predictions for the given input data."""

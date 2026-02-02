@@ -52,7 +52,8 @@ def main():
         X_train, X_valid, y_train, y_valid = train_test_split(
             processed_train_data.drop(columns=[dataset_config["target"]]), 
             processed_train_data[dataset_config["target"]],
-            test_size=0.2
+            test_size=0.2,
+            random_state=42
         )
         
         if main_config["use_gradient_boosting"]:

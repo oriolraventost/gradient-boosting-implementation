@@ -118,7 +118,7 @@ class GBRegressor:
     def _early_stopping_needed(self, y_valid: pd.Series, valid_preds: np.ndarray, iter: int, patience: int) -> bool:
         """Calculates loss on Validation Set and handles early stopping."""
         current_loss = mean_squared_error(y_valid, valid_preds)
-        logger.info(f"Iteration: {iter} | Validation loss: {current_loss:.4f}")
+        logger.info(f"Iteration: {iter+1} | Validation loss: {current_loss:.4f}")
 
         if current_loss < self.best_loss:
             self.best_loss = current_loss

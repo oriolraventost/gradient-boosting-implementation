@@ -3,7 +3,7 @@ gradient_boosting:
   upsilon: 0.8
   learning_rate: 0.01
   patience: 3
-  max_iter: 20
+  max_iter: 30
 
 decision_tree:
   init_params:
@@ -15,5 +15,4 @@ neural_network:
   fit_params:
     learning_rate: 0.01
     weight_decay: 0.001
-    epochs: 20
-    patience: 3
+    epochs: 3
