@@ -1,8 +1,10 @@
+MAIN_CONFIG_PATH = "configs/main.yaml"
+GRADIENT_BOOSTING_CONFIG_PATH = "configs/gradient_boosting.yaml"
 DATASETS_CONFIG_PATH = "configs/datasets.yaml"
-MODELS_CONFIG_PATH = "configs/models.yaml"
 
 RAW_DATA_PATH = "data/raw"
 PROCESSED_DATA_PATH = "data/processed"
 PREDICTIONS_DATA_PATH = "data/predictions"
 
+MODELS_PATH = "models/"
 MODELS_REGISTRY_PATH = "models/registry.json"

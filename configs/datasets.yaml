@@ -1,34 +1,3 @@
 insurance:
   target: Premium Amount
-  id_column: id
-  num_cols:
-  - Age
-  - Annual Income
-  - Number of Dependents
-  - Health Score
-  - Previous Claims
-  - Vehicle Age
-  - Credit Score
-  - Insurance Duration
-  cat_cols:
-  - Gender
-  - Marital Status
-  - Education Level
-  - Occupation
-  - Location
-  - Policy Type
-  - Customer Feedback
-  - Smoking Status
-  - Exercise Frequency
-  - Property Type
-  cat_cardinalities:
-  - 2
-  - 3
-  - 4
-  - 3
-  - 3
-  - 3
-  - 3
-  - 2
-  - 4
-  - 3
+  id: id
