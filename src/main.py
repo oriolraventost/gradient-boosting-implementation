@@ -9,6 +9,7 @@ from sklearn.model_selection import train_test_split
 from src import *
 from src.processor import Processor
 from src.gb_regressor import GBRegressor
+from src.gb_classifier import GBClassifier
 
 def main():
     '''Main workflow for loading data, training and generating predictions with gradient boosting.'''
@@ -16,7 +17,7 @@ def main():
         main_config = yaml.safe_load(f)
     
     with open(GRADIENT_BOOSTING_CONFIG_PATH, "r") as f:
-        gb_config = yaml.safe_load(f)
+        gradient_boosting_config = yaml.safe_load(f)
     
     with open(DATASETS_CONFIG_PATH, "r") as f:
         dataset_config = yaml.safe_load(f)[main_config["dataset_name"]]
@@ -46,7 +47,11 @@ def main():
         processed_train_data = pd.read_csv(processed_train_data_path)
         processed_test_data = pd.read_csv(processed_test_data_path)
 
-    model = GBRegressor()
+    if main_config["problem_type"] == "regression":
+        model = GBRegressor(**gradient_boosting_config)
+
+    elif main_config["problem_type"] == "classification":
+        model = GBClassifier(**gradient_boosting_config)
 
     if main_config["train"]:
         X_train, X_valid, y_train, y_valid = train_test_split(
@@ -56,14 +61,7 @@ def main():
             random_state=42
         )
             
-        model.fit(
-            X_train, y_train, X_valid, y_valid,
-            upsilon=gb_config["upsilon"],
-            learning_rate=gb_config["learning_rate"],
-            patience=gb_config["patience"],
-            max_iter=gb_config["max_iter"],
-            max_depth=gb_config["max_depth"]
-        )
+        model.fit(X_train, y_train, X_valid, y_valid)
             
         timestamp = datetime.now()
         formatted_timestamp = timestamp.strftime("%Y_%m_%d_%H_%M")
@@ -78,10 +76,11 @@ def main():
             
         current_best_loss = registry.get(main_config["dataset_name"], {}).get("validation_loss", float('inf'))
         if model.best_loss < current_best_loss:
-            registry.setdefault(main_config["dataset_name"], {}) == {
+            dataset_entry = registry.setdefault(main_config["dataset_name"], {})
+            dataset_entry.update({
                 "best": formatted_timestamp,
                 "validation_loss": model.best_loss
-            }
+            })
             
         with open("models/registry.json", 'w', encoding='utf-8') as file:
             json.dump(registry, file, indent=4)

@@ -3,8 +3,9 @@ import joblib
 import numpy as np
 import pandas as pd
 
-from sklearn.tree import DecisionTreeRegressor
 from sklearn.metrics import log_loss
+from sklearn.tree import DecisionTreeRegressor
+from sklearn.utils.extmath import softmax
 
 from src.utils import derivative_log_loss
 
@@ -36,9 +37,11 @@ class GBClassifier:
     ) -> None:
         '''Trains the boosting ensemble using stage-wise additive modeling.'''
         logger.info("Starting gradient boosting classification training...")
+
+        self.best_iter = 0
+        self.best_loss = float('inf')
         
         self.initial_constant = self._compute_initial_constant(y_train)
-        logger.info(f"Initial constant of the boosting ensemble (logarithm of proportions): {" ".join(self.initial_constant)}")
         
         train_preds = pd.DataFrame(np.tile(self.initial_constant, (len(y_train), 1)), columns=range(len(self.initial_constant)))
         valid_preds = pd.DataFrame(np.tile(self.initial_constant, (len(y_valid), 1)), columns=range(len(self.initial_constant)))
@@ -101,10 +104,11 @@ class GBClassifier:
 
     def _early_stopping_needed(self, y_valid: pd.Series, valid_preds: pd.DataFrame, iter: int) -> bool:
         """Monitors validation loss and rolls back learners if improvement stalls."""
-        current_loss = log_loss(y_valid, valid_preds)
+        valid_probabilities = softmax(valid_preds.values)
+        current_loss = log_loss(y_valid, valid_probabilities, labels=range(valid_preds.shape[1]))
 
         if not (iter + 1) % 10:
-            logger.info(f"Iteration: {iter+1} | CE validation loss: {current_loss:.4f}")
+            logger.info(f"Iteration: {iter+1} | CE validation loss: {current_loss:.6f}")
 
         if current_loss < self.best_loss:
             self.best_loss = current_loss
@@ -114,10 +118,6 @@ class GBClassifier:
         if iter - self.best_iter >= self.patience:
             logger.info(f"Early stopping triggered at iteration {iter}. Best iteration: {self.best_iter}")
             self.learners = self.learners[:self.best_iter]
-
-            self.best_iter = 0
-            self.best_loss = float('inf')
-            
             return True
             
         return False

@@ -1,3 +1,6 @@
 insurance:
   target: Premium Amount
   id: id
+diabetes:
+  target: diagnosed_diabetes
+  id: id

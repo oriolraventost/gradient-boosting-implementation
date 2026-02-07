@@ -1,4 +1,5 @@
-dataset_name: "insurance"
+dataset_name: "diabetes"
+problem_type: "classification"
 preprocess: False
 train: True
-predict: True
+predict: False
