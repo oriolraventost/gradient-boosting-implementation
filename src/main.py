@@ -12,7 +12,16 @@ from src.gb_regressor import GBRegressor
 from src.gb_classifier import GBClassifier
 
 def main():
-    '''Main workflow for loading data, training and generating predictions with gradient boosting.'''
+    """Main workflow for loading data, training, and generating predictions with gradient boosting.
+    
+    This function implements a configuration-driven pipeline that:
+    1. Loads project settings and dataset metadata from YAML files.
+    2. Handles data ingestion and conditional preprocessing using the Processor class.
+    3. Dynamically instantiates models based on the problem type (regression vs. classification).
+    4. Executes training with a 20% validation split for early stopping.
+    5. Manages a Model Registry (JSON) to track the best-performing model versions.
+    6. Generates and exports predictions for the test set.
+    """
     with open(MAIN_CONFIG_PATH, "r") as f:
         main_config = yaml.safe_load(f)
     

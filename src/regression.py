@@ -1,14 +1,25 @@
 import numpy as np
 import pandas as pd
 
-from sklearn.model_selection import train_test_split
-
 from src.tree import XGBTree
 
 class XGBRegressor:
+    """Manager class for the Gradient Boosting ensemble using histogram-based trees.
+    
+    This class orchestrates the training of multiple XGBTree instances. It handles 
+    data discretization (binning), stochastic row and column subsampling, 
+    and early stopping based on validation MSE.
+
+    Attributes:
+        n_estimators (int): Maximum number of trees in the ensemble.
+        learning_rate (float): Step size shrinkage used to prevent overfitting.
+        trees (list[XGBTree]): The collection of fitted histogram-based trees.
+        bin_thresholds (list[np.ndarray]): The quantile boundaries used to discretize 
+            continuous features during training and inference.
+        initial_constant (float | None): The global mean of the target, used as 
+            the starting prediction.
     """
-    Manager class for the Gradient Boosting ensemble.
-    """
+
     def __init__(
         self,
         n_estimators: int,
@@ -20,6 +31,7 @@ class XGBRegressor:
         colsample_bytree: float,
         early_stopping_rounds: int
     ):
+        """Initializes the ensemble with hyperparameter configurations."""
         self.n_estimators = n_estimators
         self.learning_rate = learning_rate
         self.max_depth = max_depth
@@ -34,6 +46,17 @@ class XGBRegressor:
         self.initial_constant: float | None = None
 
     def fit(self, X: pd.DataFrame, y: pd.Series, X_val: pd.DataFrame, y_val: pd.Series):
+        """Trains the ensemble using second-order gradients and early stopping.
+        
+        The method converts input data to binned integers, initializes predictions 
+        to the target mean, and iteratively adds trees to minimize MSE.
+
+        Args:
+            X (pd.DataFrame): Training features.
+            y (pd.Series): Training target values.
+            X_val (pd.DataFrame): Validation features.
+            y_val (pd.Series): Validation target values.
+        """
         X_arr, y_arr = np.asarray(X), np.asarray(y)
         X_val_arr, y_val_arr = np.asarray(X_val), np.asarray(y_val)
         
@@ -64,11 +87,9 @@ class XGBRegressor:
             valid_preds += self.learning_rate * tree.predict(X_val_binned)
             
             loss = np.mean((valid_preds - y_val_arr)**2)
-            print(f"iteration {i} loss {loss}")
             
             if loss < best_loss:
                 best_loss, wait = loss, 0
-            
             else:
                 wait += 1
             
@@ -76,6 +97,14 @@ class XGBRegressor:
                 break
 
     def predict(self, X: pd.DataFrame) -> pd.Series:
+        """Generates predictions for new data.
+
+        Args:
+            X (pd.DataFrame): Feature matrix.
+
+        Returns:
+            pd.Series: Aggregated ensemble predictions.
+        """
         X_arr = np.asarray(X)
         X_binned = self._apply_bin_mapping(X_arr)
         
@@ -85,6 +114,15 @@ class XGBRegressor:
         return pd.Series(preds, index=X.index)
     
     def _get_bin_mapping(self, X: np.ndarray) -> tuple[np.ndarray, list[np.ndarray]]:
+        """Creates quantile-based bins for each feature in the training set.
+        
+        Args:
+            X (np.ndarray): Continuous feature matrix.
+
+        Returns:
+            tuple[np.ndarray, list[np.ndarray]]: Binned matrix and the list of 
+                thresholds for each feature.
+        """
         bin_thresholds = []
         X_binned = np.zeros(X.shape, dtype=np.uint8)
         for j in range(X.shape[1]):
@@ -94,31 +132,13 @@ class XGBRegressor:
         return X_binned, bin_thresholds
 
     def _apply_bin_mapping(self, X: np.ndarray) -> np.ndarray:
-        """Helper to bin new data using fitted thresholds."""
+        """Applies previously fitted bin thresholds to new data.
+        
+        This ensures that test/validation data is discretized exactly like 
+        the training data, preventing feature misalignment.
+        """
         X_binned = np.zeros(X.shape, dtype=np.uint8)
         for j in range(X.shape[1]):
             t = self.bin_thresholds[j]
             X_binned[:, j] = np.clip(np.searchsorted(t, X[:, j], side='right') - 1, 0, len(t)-1)
         return X_binned
-
-if __name__ == "__main__":
-    df = pd.read_csv("data/processed/insurance_train.csv")
-
-    X_train, X_valid, y_train, y_valid = train_test_split(
-            df.drop(columns=["Premium Amount"]), 
-            df["Premium Amount"],
-            test_size=0.2,
-            random_state=42
-        )
-    
-    model = XGBRegressor(
-        n_estimators=1000,
-        learning_rate=0.1,
-        max_depth=3,
-        reg_lambda=1,
-        gamma=0,
-        subsample=0.8,
-        colsample_bytree=0.8,
-        early_stopping_rounds=10
-    )
-    model.fit(X_train, y_train, X_valid, y_valid)

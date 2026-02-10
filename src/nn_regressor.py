@@ -12,10 +12,32 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class NNRegressor(nn.Module):
+    """A PyTorch neural network regressor for tabular data.
+    
+    This model utilizes a hybrid architecture that processes numerical features 
+    and categorical features separately before merging them. Categorical 
+    features are passed through an Embedding layer, where the embedding 
+    dimension is determined by the square root of the category cardinality.
+    
+    The backend is a Multi-Layer Perceptron (MLP) with Batch Normalization 
+    and Dropout for regularization.
+
+    Attributes:
+        cat_cols (list[str]): Names of the categorical columns.
+        num_cols (list[str]): Names of the numerical columns.
+        embeddings (nn.ModuleList): List of embedding layers for each categorical feature.
+        mlp (nn.Sequential): The core deep learning layers.
+        device (torch.device): The hardware (CPU/GPU) where the model is loaded.
     """
-    A PyTorch neural network regressor.
-    """
+
     def __init__(self, cat_cols: list[str], num_cols: list[str], cat_cardinalities: list[int]):
+        """Initializes the network layers and moves the model to the best available device.
+
+        Args:
+            cat_cols (list[str]): List of categorical feature names.
+            num_cols (list[str]): List of numerical feature names.
+            cat_cardinalities (list[int]): Number of unique values for each categorical feature.
+        """
         super().__init__()
         
         self.cat_cols: list[str] = cat_cols
@@ -50,7 +72,17 @@ class NNRegressor(nn.Module):
         self.to(self.device)
 
     def _prepare_loaders(self, X: pd.DataFrame, y: pd.Series, batch_size: int = 2**10, train_split: float = 0.8):
-        '''Turn pandas data into torch loaders.'''
+        """Converts Pandas DataFrames into PyTorch DataLoaders.
+
+        Args:
+            X (pd.DataFrame): Feature matrix.
+            y (pd.Series): Target vector.
+            batch_size (int): Number of samples per gradient update.
+            train_split (float): Ratio of data to use for internal training vs validation.
+
+        Returns:
+            tuple[DataLoader, DataLoader]: Training and validation data loaders.
+        """
         X_nums_tensor = torch.tensor(X[self.num_cols].values, dtype=torch.float32)
         X_cats_tensor = torch.tensor(X[self.cat_cols].values, dtype=torch.long)
         y_tensor = torch.tensor(y.values.reshape(-1, 1), dtype=torch.float32)
@@ -67,7 +99,15 @@ class NNRegressor(nn.Module):
         return train_loader, val_loader
 
     def forward(self, x_nums: torch.Tensor, x_cats: torch.Tensor) -> torch.Tensor:
-        """Standard PyTorch forward pass."""
+        """Standard PyTorch forward pass.
+
+        Args:
+            x_nums (torch.Tensor): Tensor of numerical features.
+            x_cats (torch.Tensor): Tensor of categorical features (integer encoded).
+
+        Returns:
+            torch.Tensor: Continuous output values.
+        """
         emb_outputs = []
         for i, emb_layer in enumerate(self.embeddings):
             emb_outputs.append(emb_layer(x_cats[:, i]))
@@ -76,15 +116,19 @@ class NNRegressor(nn.Module):
         
         return self.mlp(x)
 
-    def fit(
-        self, 
-        X: pd.DataFrame,
-        y: pd.Series,
-        learning_rate: float,
-        weight_decay: float,
-        epochs: int
-    ) -> None:
-        """Optimized training using OneCycleLR for fast convergence."""
+    def fit(self, X: pd.DataFrame, y: pd.Series, learning_rate: float, weight_decay: float, epochs: int) -> None:
+        """Trains the network using an AdamW optimizer and OneCycleLR scheduler.
+        
+        The training process includes internal validation splitting and restores the 
+        weights from the epoch with the lowest validation loss (Early Stopping behavior).
+
+        Args:
+            X (pd.DataFrame): Training features.
+            y (pd.Series): Training labels.
+            learning_rate (float): Maximum learning rate for the OneCycle policy.
+            weight_decay (float): L2 regularization coefficient.
+            epochs (int): Number of complete passes over the dataset.
+        """
         train_loader, val_loader = self._prepare_loaders(X, y)
         criterion = nn.MSELoss()
         
@@ -147,7 +191,14 @@ class NNRegressor(nn.Module):
             logger.info(f"Training complete. Best Val MSE: {best_val_loss:.4f} restored.")
 
     def predict(self, X: pd.DataFrame) -> np.ndarray:
-        """Generates predictions for the given input data."""
+        """Generates regression predictions for the given input data.
+
+        Args:
+            X (pd.DataFrame): Input feature matrix.
+
+        Returns:
+            np.ndarray: Flattened array of numerical predictions.
+        """
         X_nums_tensor = torch.tensor(X[self.num_cols].values, dtype=torch.float32)
         X_cats_tensor = torch.tensor(X[self.cat_cols].values, dtype=torch.long)
         
