@@ -4,7 +4,7 @@ import pandas as pd
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
 from sklearn.impute import SimpleImputer
-from sklearn.preprocessing import OneHotEncoder
+from sklearn.preprocessing import OrdinalEncoder
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -52,7 +52,7 @@ class Processor:
         """Constructs a pipeline for numerical and categorical preprocessing.
         
         Numerical features are median-imputed. Categorical features are 
-        One-Hot Encoded with unknown values ignored. The output is configured 
+        Ordinal Encoded with unknown values ignored. The output is configured 
         to return a pandas DataFrame.
         """
         self.transformer = ColumnTransformer(
@@ -61,7 +61,8 @@ class Processor:
                     ('impute', SimpleImputer(strategy='median'))
                 ]), self.num_cols),
                 ('cat', Pipeline([
-                    ('encode', OneHotEncoder(sparse_output=False, handle_unknown='ignore'))
+                    ('impute', SimpleImputer(strategy="constant", fill_value='NA')),
+                    ('encode', OrdinalEncoder(handle_unknown='use_encoded_value', unknown_value=-1))
                 ]), self.cat_cols),
             ],
             verbose_feature_names_out=False

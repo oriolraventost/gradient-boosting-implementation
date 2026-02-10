@@ -6,6 +6,7 @@ import pandas as pd
 from sklearn.tree import DecisionTreeRegressor
 from sklearn.metrics import mean_squared_error
 
+from src.nn_regressor import NNRegressor
 from src.utils import derivative_mean_squared_error
 
 logger = logging.getLogger(__name__)
@@ -15,26 +16,41 @@ class GBRegressor:
     """Gradient boosting regression supporting subsampling and early stopping.
     
     This model implements a stage-wise additive ensemble that minimizes Mean 
-    Squared Error (MSE) by fitting subsequent trees to the negative gradient 
-    (pseudo-residuals) of the previous iterations.
+    Squared Error (MSE) by fitting subsequent networks to the negative gradient 
+    (pseudo-residuals) of the previous iterations. Scales target variable to
+    mean 0 and std 1.
 
     Attributes:
+        max_iter (int): Maximum number of boosting stages (networks).
+        learning_rate (float): Step size shrinkage used in update to prevent overfitting.
+        patience (int): Number of iterations to wait for improvement before stopping.
+        upsilon (float): Fraction of training data to use for each tree (0.0 to 1.0].
         weights (list[float]): A list containing the initial constant (target mean) 
-            followed by the learning rate used for each subsequent tree.
-        decision_trees (list[DecisionTreeRegressor]): The collection of base 
+            followed by the learning rate used for each subsequent network.
+        neural_networks (list[NNRegressor]): The collection of base 
             learners (weak regressors) fitted during training.
         best_loss (float): The minimum Mean Squared Error recorded on the 
             validation set.
         best_iter (int): The iteration index that yielded the best_loss.
+        target_mean (float): Mean of the target variable in the training data.
+        target_std (float): STD of the target variable in the training data.
     """
 
-    def __init__(self):
+    def __init__(self, max_iter: int, learning_rate: float, upsilon: float, patience: int):
         """Initializes the model structure and tracking for early stopping."""
+        self.max_iter: int = max_iter
+        self.learning_rate: float = learning_rate
+        self.patience: int = patience
+        self.upsilon: float = upsilon
+        
         self.weights: list[float] = []
-        self.decision_trees: list[DecisionTreeRegressor] = []
+        self.neural_networks: list[NNRegressor] = []
         
         self.best_loss: float = float('inf')
         self.best_iter: int = 0
+
+        self.target_mean: float | None = None
+        self.target_std: float | None = None
 
     def fit(
         self,
@@ -42,11 +58,8 @@ class GBRegressor:
         y_train: pd.Series,
         X_valid: pd.DataFrame,
         y_valid: pd.Series,
-        upsilon: float,
-        learning_rate: float,
-        patience: int,
-        max_iter: int,
-        max_depth: int
+        dataset_config: dict,
+        network_fit_config: dict
     ) -> None:
         """Trains the boosting ensemble using stage-wise additive modeling.
 
@@ -55,14 +68,17 @@ class GBRegressor:
             y_train (pd.Series): Training target vector.
             X_valid (pd.DataFrame): Validation feature matrix for early stopping.
             y_valid (pd.Series): Validation target vector for early stopping.
-            upsilon (float): Subsample ratio (fraction of rows) for stochastic boosting.
-            learning_rate (float): Shrinkage factor applied to each tree's output.
-            patience (int): Iterations to wait for improvement before stopping.
-            max_iter (int): Maximum number of trees to build.
-            max_depth (int): Maximum depth of each decision tree.
+            dataset_config (dict): Dictionary of the dataset structure.
+            network_config (dict): Dictionary of network fitting configuration.
         """
         logger.info("Starting gradient boosting regression training...")
         
+        self.target_mean = y_train.mean()
+        self.target_std = y_train.std()
+
+        y_train = (y_train - self.target_mean) / self.target_std
+        y_valid = (y_valid - self.target_mean) / self.target_std
+
         initial_constant = self._compute_initial_constant(y_train)
         self.weights.append(initial_constant)
         logger.info(f"Initial constant of the boosting ensemble (target mean): {initial_constant:.4f}")
@@ -70,24 +86,35 @@ class GBRegressor:
         train_preds = np.full(len(y_train), initial_constant)
         valid_preds = np.full(len(y_valid), initial_constant)
 
-        for iter in range(max_iter):            
-            X_train_sub, y_train_sub, train_preds_sub = self._draw_subsample(X_train, y_train, train_preds, upsilon)
+        for iter in range(self.max_iter):            
+            X_train_sub, y_train_sub, train_preds_sub = self._draw_subsample(X_train, y_train, train_preds, self.upsilon)
             pseudo_residuals_sub = self._compute_pseudo_residuals(y_train_sub, train_preds_sub)
             
-            neural_network = DecisionTreeRegressor(max_depth=max_depth, random_state=42)
-            neural_network.fit(X_train_sub, pseudo_residuals_sub)
+            neural_network = NNRegressor(
+                cat_cols=dataset_config["cat_cols"],
+                num_cols=dataset_config["num_cols"],
+                cat_cardinalities=dataset_config["cat_cardinalities"]
+            )
+            neural_network.fit(
+                X=X_train_sub,
+                y=pseudo_residuals_sub,
+                learning_rate=network_fit_config["learning_rate"],
+                weight_decay=network_fit_config["weight_decay"],
+                epochs=network_fit_config["epochs"]
+            )
             
-            train_preds += learning_rate * decision_tree.predict(X_train)
-            valid_preds += learning_rate * decision_tree.predict(X_valid)
+            train_preds += self.learning_rate * neural_network.predict(X_train)
+            valid_preds += self.learning_rate * neural_network.predict(X_valid)
             
-            self.weights.append(learning_rate)
-            self.decision_trees.append(decision_tree)
+            self.weights.append(self.learning_rate)
+            self.neural_networks.append(neural_network)
             
-            if self._early_stopping_needed(y_valid, valid_preds, iter, patience):
+            if self._early_stopping_needed(y_valid, valid_preds, iter, self.patience):
                 break
     
     def predict(self, X: pd.DataFrame) -> pd.Series:
         """Aggregates predictions from the base learners scaled by their weights.
+           Scales them back using mean and STD of the training data.
 
         Args:
             X (pd.DataFrame): Feature matrix to generate predictions for.
@@ -99,18 +126,20 @@ class GBRegressor:
 
         preds = pd.Series(self.weights[0], index=X.index)
 
-        for weight, decision_tree in zip(self.weights[1:], self.decision_trees):
-            preds += weight * decision_tree.predict(X)
+        for weight, neural_network in zip(self.weights[1:], self.neural_networks):
+            preds += weight * neural_network.predict(X)
 
-        return preds
+        scaled_preds = self.target_std * preds + self.target_mean
+
+        return scaled_preds
 
     def save_model(self, file_path: str) -> None:
-        """Serializes the ensemble weights and decision trees to a file.
+        """Serializes the ensemble weights and neural networks to a file.
 
         Args:
             file_path (str): Destination path for the joblib artifact.
         """
-        joblib.dump({"weights": self.weights, "decision_trees": self.decision_trees}, file_path)
+        joblib.dump({"weights": self.weights, "neural_networks": self.neural_networks}, file_path)
         logger.info(f"Model saved to {file_path}")
 
     def load_model(self, file_path: str) -> None:
@@ -123,7 +152,7 @@ class GBRegressor:
         logger.info(f"Model loaded from {file_path}")
         
         self.weights = model_data["weights"]
-        self.decision_trees = model_data["decision_trees"]
+        self.decision_trees = model_data["neural_networks"]
     
     def _compute_initial_constant(self, y_train: pd.Series) -> float:
         """Calculates the optimal constant baseline (mean) for MSE loss."""
@@ -172,7 +201,6 @@ class GBRegressor:
         if iter - self.best_iter >= patience:
             logger.info(f"Early stopping triggered at iteration {iter}. Best iteration: {self.best_iter}")
             valid_count = self.best_iter
-            # Rollback to the best state
             self.weights = self.weights[:valid_count + 1]
             self.decision_trees = self.decision_trees[:valid_count]
 

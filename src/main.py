@@ -30,6 +30,9 @@ def main():
     
     with open(DATASETS_CONFIG_PATH, "r") as f:
         dataset_config = yaml.safe_load(f)[main_config["dataset_name"]]
+    
+    with open(NEURAL_NETWORK_CONFIG_PATH, "r") as f:
+        neural_network_config = yaml.safe_load(f)
 
     raw_train_data_path = Path(RAW_DATA_PATH) / f"{main_config['dataset_name']}_train.csv"
     raw_test_data_path = Path(RAW_DATA_PATH) / f"{main_config['dataset_name']}_test.csv"
@@ -69,13 +72,21 @@ def main():
             test_size=0.2,
             random_state=42
         )
-            
-        model.fit(X_train, y_train, X_valid, y_valid)
-            
-        timestamp = datetime.now()
-        formatted_timestamp = timestamp.strftime("%Y_%m_%d_%H_%M")
-        model.save_model(f"models/{main_config['dataset_name']}/{formatted_timestamp}.joblib")
+        
+        start_time = datetime.now()
+        formatted_start_timestamp = start_time.strftime("%Y_%m_%d_%H_%M")
 
+        model.fit(X_train, y_train, X_valid, y_valid, dataset_config, neural_network_config)
+            
+        end_time = datetime.now()
+        formatted_end_timestamp = end_time.strftime("%Y_%m_%d_%H_%M")
+
+        model_dir = Path(f"models/{main_config['dataset_name']}")
+        model_dir.mkdir(parents=True, exist_ok=True)
+
+        model_path = model_dir / f"{formatted_end_timestamp}.joblib"
+        model.save_model(str(model_path))
+        
         try:
             with open(MODELS_REGISTRY_PATH, 'r') as file:
                 registry = json.load(file)
@@ -87,8 +98,12 @@ def main():
         if model.best_loss < current_best_loss:
             dataset_entry = registry.setdefault(main_config["dataset_name"], {})
             dataset_entry.update({
-                "best": formatted_timestamp,
-                "validation_loss": model.best_loss
+                "best": formatted_start_timestamp,
+                "validation_loss": model.best_loss,
+                "start_time": formatted_start_timestamp,
+                "end_time": formatted_end_timestamp,
+                **gradient_boosting_config,
+                **neural_network_config
             })
             
         with open("models/registry.json", 'w', encoding='utf-8') as file:
