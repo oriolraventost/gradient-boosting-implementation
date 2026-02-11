@@ -88,7 +88,7 @@ class GBRegressor:
             X_train_sub, y_train_sub, train_preds_sub = self._draw_subsample(X_train, y_train, train_preds, self.upsilon)
             pseudo_residuals_sub = self._compute_pseudo_residuals(y_train_sub, train_preds_sub)
             
-            weak_learner = DecisionTreeRegressor(max_depth=self.max_depth)
+            weak_learner = DecisionTreeRegressor(max_depth=self.max_depth, random_state=42)
             weak_learner.fit(
                 X=X_train_sub,
                 y=pseudo_residuals_sub
