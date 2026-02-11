@@ -76,7 +76,7 @@ def main():
         start_time = datetime.now()
         formatted_start_timestamp = start_time.strftime("%Y_%m_%d_%H_%M")
 
-        model.fit(X_train, y_train, X_valid, y_valid, dataset_config, neural_network_config)
+        model.fit(X_train, y_train, X_valid, y_valid)
             
         end_time = datetime.now()
         formatted_end_timestamp = end_time.strftime("%Y_%m_%d_%H_%M")
@@ -103,7 +103,6 @@ def main():
                 "start_time": formatted_start_timestamp,
                 "end_time": formatted_end_timestamp,
                 **gradient_boosting_config,
-                **neural_network_config
             })
             
         with open("models/registry.json", 'w', encoding='utf-8') as file:
