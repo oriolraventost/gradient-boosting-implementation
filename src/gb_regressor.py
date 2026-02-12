@@ -10,43 +10,60 @@ from src.nn_regressor import NNRegressor
 from src.utils import derivative_mean_squared_error
 
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
 
 class GBRegressor:
     """Gradient boosting regression supporting subsampling and early stopping.
     
     This model implements a stage-wise additive ensemble that minimizes Mean 
-    Squared Error (MSE) by fitting subsequent trees to the negative gradient 
-    (pseudo-residuals) of the previous iterations. Scales target variable to
-    mean 0 and std 1.
+    Squared Error (MSE) by fitting subsequent weak learners to the negative
+    gradient (pseudo-residuals) of the previous iterations. Scales target
+    variable to mean 0 and std 1.
 
     Attributes:
-        max_iter (int): Maximum number of boosting stages (trees).
-        learning_rate (float): Step size shrinkage used in update to prevent overfitting.
-        patience (int): Number of iterations to wait for improvement before stopping.
-        upsilon (float): Fraction of training data to use for each tree (0.0 to 1.0].
-        max_depth (int): Maximum depth of weak learner trees.
-        weights (list[float]): A list containing the initial constant (target mean) 
-            followed by the learning rate used for each subsequent tree.
-        weak_learners (list[DecisionTreeRegressor]): The collection of base 
-            learners (weak regressors) fitted during training.
+        n_estimators (int): Maximum number of boosting stages.
+        learning_rate (float): Step size shrinkage used in update.
+        subsample (float): Fraction of observations to use for each
+            weak learner.
+        colsample_bytree (float): Fraction of features to use for 
+            each weak learner.
+        early_stopping_rounds (int): Maximum number of non-improving
+                iterations allowed.
+        max_depth (int): Maximum depth of trees.
+        initial_constant (float): Initial constant of boosting ensemble.
+        weak_learners (list[tuple(DecisionTreeRegressor, np.ndarray)]): The
+            collection of weak learners fitted during training and the
+            features they were fitted on.
         best_loss (float): The minimum Mean Squared Error recorded on the 
             validation set.
         best_iter (int): The iteration index that yielded the best_loss.
         target_mean (float): Mean of the target variable in the training data.
-        target_std (float): STD of the target variable in the training data.
+        target_std (float): Standard deviation of the target variable in the
+            training data.
     """
 
-    def __init__(self, max_iter: int, learning_rate: float, upsilon: float, patience: int, max_depth: int):
-        """Initializes the model structure and tracking for early stopping."""
-        self.max_iter: int = max_iter
+    def __init__(
+        self,
+        n_estimators: int,
+        learning_rate: float,
+        subsample: float,
+        colsample_bytree: float,
+        early_stopping_rounds: int,
+        max_depth: int
+    ):
+        """Initializes the model structure."""
+        self.n_estimators: int = n_estimators
         self.learning_rate: float = learning_rate
-        self.patience: int = patience
-        self.upsilon: float = upsilon
+        self.subsample: float = subsample
+        self.colsample_bytree: float = colsample_bytree
+        self.early_stopping_rounds: int = early_stopping_rounds
         self.max_depth: int = max_depth
         
-        self.weights: list[float] = []
-        self.weak_learners: list[DecisionTreeRegressor] = []
+        self.initial_constant: float | None = None
+        self.weak_learners: list[tuple[DecisionTreeRegressor, list]] = []
         
         self.best_loss: float = float('inf')
         self.best_iter: int = 0
@@ -64,77 +81,106 @@ class GBRegressor:
         """Trains the boosting ensemble using stage-wise additive modeling.
 
         Args:
-            X_train (pd.DataFrame): Training feature matrix.
-            y_train (pd.Series): Training target vector.
-            X_valid (pd.DataFrame): Validation feature matrix for early stopping.
-            y_valid (pd.Series): Validation target vector for early stopping.
+            X_train (pd.DataFrame): Training feature variables.
+            y_train (pd.Series): Training target variable.
+            X_valid (pd.DataFrame): Validation features variables.
+            y_valid (pd.Series): Validation target variable.
         """
-        logger.info("Starting gradient boosting regression training...")
-        
+        X_train = X_train.to_numpy()
+        y_train = y_train.to_numpy()
+        X_valid = X_valid.to_numpy()
+        y_valid = y_valid.to_numpy()
+
+        n_rows_train, n_cols_train = X_train.shape
+
         self.target_mean = y_train.mean()
         self.target_std = y_train.std()
 
         y_train = (y_train - self.target_mean) / self.target_std
         y_valid = (y_valid - self.target_mean) / self.target_std
 
-        initial_constant = self._compute_initial_constant(y_train)
-        self.weights.append(initial_constant)
-        logger.info(f"Initial constant of the boosting ensemble (target mean): {initial_constant:.4f}")
+        self.initial_constant = self._compute_initial_constant(y_train)
         
-        train_preds = np.full(len(y_train), initial_constant)
-        valid_preds = np.full(len(y_valid), initial_constant)
+        train_preds = np.full(len(y_train), self.initial_constant)
+        valid_preds = np.full(len(y_valid), self.initial_constant)
 
-        for iter in range(self.max_iter):            
-            X_train_sub, y_train_sub, train_preds_sub = self._draw_subsample(X_train, y_train, train_preds, self.upsilon)
-            pseudo_residuals_sub = self._compute_pseudo_residuals(y_train_sub, train_preds_sub)
-            
-            weak_learner = DecisionTreeRegressor(max_depth=self.max_depth, random_state=42)
-            weak_learner.fit(
-                X=X_train_sub,
-                y=pseudo_residuals_sub
+        for iter in range(self.n_estimators):            
+            subsample_idx, colsample_bytree_idx = self._draw_subsample(
+                n_rows_train,
+                n_cols_train
             )
             
-            train_preds += self.learning_rate * weak_learner.predict(X_train)
-            valid_preds += self.learning_rate * weak_learner.predict(X_valid)
+            pseudo_residuals = self._compute_pseudo_residuals(
+                y_train[subsample_idx],
+                train_preds[subsample_idx]
+            )
             
-            self.weights.append(self.learning_rate)
-            self.weak_learners.append(weak_learner)
+            weak_learner = DecisionTreeRegressor(
+                max_depth=self.max_depth,
+                random_state=42
+            )
+
+            weak_learner.fit(
+                X_train[subsample_idx][:, colsample_bytree_idx],
+                pseudo_residuals
+            )
             
-            if self._early_stopping_needed(y_valid, valid_preds, iter, self.patience):
+            train_preds += self.learning_rate * weak_learner.predict(
+                X_train[:, colsample_bytree_idx]
+            )
+            
+            valid_preds += self.learning_rate * weak_learner.predict(
+                X_valid[:, colsample_bytree_idx]
+            )
+            
+            self.weak_learners.append((weak_learner, colsample_bytree_idx))
+            
+            if self._early_stopping_needed(
+                y_valid,
+                valid_preds,
+                iter
+            ):
                 break
     
-    def predict(self, X: pd.DataFrame) -> pd.Series:
-        """Aggregates predictions from the base learners scaled by their weights.
-           Scales them back using mean and STD of the training data.
+    def predict(self, X: pd.DataFrame) -> np.ndarray:
+        """Aggregates predictions from the base learners.
+        Scales them back using mean and STD of the training data.
 
         Args:
-            X (pd.DataFrame): Feature matrix to generate predictions for.
+            X (pd.DataFrame): Feature variables to generate predictions for.
 
         Returns:
-            pd.Series: Continuous regression predictions.
+            np.ndarray: Regression predictions.
         """
-        logger.info(f"Generating gradient boosting predictions...")
+        X = X.to_numpy()
 
-        preds = pd.Series(self.weights[0], index=X.index)
+        preds = np.full(len(X), self.initial_constant)
 
-        for weight, weak_learner in zip(self.weights[1:], self.weak_learners):
-            preds += weight * weak_learner.predict(X)
+        for (weak_learner, colsample_bytree_idx) in self.weak_learners:
+            preds += self.learning_rate * weak_learner.predict(
+                X[:, colsample_bytree_idx]
+            )
 
         scaled_preds = self.target_std * preds + self.target_mean
-
         return scaled_preds
 
     def save_model(self, file_path: str) -> None:
-        """Serializes the ensemble weights and weak learners to a file.
+        """Saves the initial constant, the weak learners and the features
+        they have been fitted on in a joblib file.
 
         Args:
-            file_path (str): Destination path for the joblib artifact.
+            file_path (str): Destination path for the artifact.
         """
-        joblib.dump({"weights": self.weights, "weak_learners": self.weak_learners}, file_path)
+        model_data = {
+            "initial_constant": self.initial_constant,
+            "weak_learners": self.weak_learners
+            }
+        
+        joblib.dump(model_data, file_path)
         logger.info(f"Model saved to {file_path}")
 
     def load_model(self, file_path: str) -> None:
-        """Deserializes a previously saved model state from a file.
+        """Loads a previously saved model from a joblib file.
 
         Args:
             file_path (str): Path to the saved model file.
@@ -142,55 +188,115 @@ class GBRegressor:
         model_data = joblib.load(file_path)
         logger.info(f"Model loaded from {file_path}")
         
-        self.weights = model_data["weights"]
+        self.initial_constant = model_data["initial_constant"]
         self.weak_learners = model_data["weak_learners"]
     
-    def _compute_initial_constant(self, y_train: pd.Series) -> float:
-        """Calculates the optimal constant baseline (mean) for MSE loss."""
+    def _compute_initial_constant(self, y_train: np.ndarray) -> float:
+        """Calculates the optimal constant baseline (mean) for MSE loss.
+        
+        Args:
+            y_train (np.ndarray): Training target variable.
+        
+        Returns:
+            float: Constant value minimizing the loss function if taken
+                as the prediction for all the observations (mean).
+        """
         return y_train.mean()
 
-    def _draw_subsample(self, X_train: pd.DataFrame, y_train: pd.Series, train_preds: np.ndarray, upsilon: float) -> tuple[pd.DataFrame, pd.Series, np.ndarray]:
-        """Performs row-wise sampling to introduce randomness into the fitting process."""
-        sample_size = int(upsilon * len(X_train))
-        subsample_idx = np.random.choice(np.arange(len(X_train)), size=sample_size, replace=False)
-
-        return X_train.iloc[subsample_idx], y_train.iloc[subsample_idx], train_preds[subsample_idx]
-
-    def _compute_pseudo_residuals(self, y_train_sub: pd.Series, train_preds_sub: np.ndarray) -> pd.Series:
-        """Calculates the negative gradient of the loss function for the current stage.
+    def _draw_subsample(
+        self,
+        n_rows_train: int,
+        n_cols_train: int
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Generates random indices for row and column sampling.
         
-        In the case of MSE, the negative gradient is simply the difference 
-        between the actual labels and the current predictions.
+        This method implements the randomness needed to reduce overfitting
+        by selecting a subset of observations and features for the current
+        boosting iteration.
+
+        Args:
+            n_rows_train (int): Total number of rows available in
+                the training set.
+            n_cols_train (int): Total number of columns available in
+                the training set.
+
+        Returns:
+            tuple[np.ndarray, np.ndarray]: A tuple containing:
+                - subsample_idx (np.ndarray): Array of integer indices
+                    for row sampling.
+                - colsample_bytree_idx (np.ndarray): Array of integer indices
+                    for column sampling.
         """
-        return pd.Series(
-            - derivative_mean_squared_error(y_train_sub, train_preds_sub),
-            index=y_train_sub.index
+        subsample_idx = np.random.choice(
+            np.arange(n_rows_train),
+            size=int(self.subsample * n_rows_train),
+            replace=False
         )
 
-    def _early_stopping_needed(self, y_valid: pd.Series, valid_preds: np.ndarray, iter: int, patience: int) -> bool:
-        """Monitors validation loss and rolls back learners if improvement stalls.
+        colsample_bytree_idx = np.random.choice(
+            np.arange(n_cols_train),
+            size=int(self.colsample_bytree * n_cols_train),
+            replace=False
+        )
+
+        return subsample_idx, colsample_bytree_idx
+
+    def _compute_pseudo_residuals(
+        self,
+        y_train_sub: np.ndarray,
+        train_preds_sub: np.ndarray
+    ) -> np.ndarray:
+        """Calculates the negative gradient of the loss function with respect
+        to the predictions for the current iteration.
+        
+        Args:
+            y_train_sub (pd.Series): Subsampled training target variable.
+            train_preds (np.ndarray): Subsampled rolling predictions on the
+                training feature variables.
+        
+        Returns:
+            pd.Series: Negative gradient of the MSE loss with respect to the
+                predictions for the current iteration.
+        """
+        return - derivative_mean_squared_error(y_train_sub, train_preds_sub)
+
+    def _early_stopping_needed(
+        self,
+        y_valid: np.ndarray,
+        valid_preds: np.ndarray,
+        iter: int
+    ) -> bool:
+        """Monitors validation loss and rolls back weak learners if
+        improvement stalls.
 
         Args:
             y_valid (pd.Series): True validation targets.
-            valid_preds (np.ndarray): Current predictions for the validation set.
+            valid_preds (np.ndarray): Current predictions for the validation
+                set.
             iter (int): Current iteration index.
-            patience (int): Maximum number of non-improving iterations allowed.
 
         Returns:
             bool: True if training should terminate, False otherwise.
         """
         current_loss = mean_squared_error(y_valid, valid_preds)
 
-        if not (iter + 1) % 10:
-            logger.info(f"Iteration: {iter+1} | MSE validation loss: {current_loss:.4f}")
+        if not (iter + 1) % 1:
+            logger.info(
+                f"Iteration: {iter+1} | "
+                f"MSE validation loss: {current_loss:.4f}"
+            )
 
         if current_loss < self.best_loss:
             self.best_loss = current_loss
             self.best_iter = iter
             return False
         
-        if iter - self.best_iter >= patience:
-            logger.info(f"Early stopping triggered at iteration {iter}. Best iteration: {self.best_iter}")
+        if iter - self.best_iter >= self.early_stopping_rounds:
+            logger.info(
+                f"Early stopping triggered at iteration {iter}. "
+                f"Best iteration: {self.best_iter}"
+            )
+            
             valid_count = self.best_iter
             self.weights = self.weights[:valid_count + 1]
             self.decision_trees = self.decision_trees[:valid_count]

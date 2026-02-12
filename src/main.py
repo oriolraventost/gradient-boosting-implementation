@@ -48,16 +48,15 @@ def main():
         processed_train_data, processed_test_data = processor.run(
             train_data=raw_train_data,
             test_data=raw_test_data,
-            target=dataset_config["target"],
-            id=dataset_config["id"]
+            target=dataset_config["target"]
         )
 
-        processed_train_data.to_csv(processed_train_data_path, index=False)
-        processed_test_data.to_csv(processed_test_data_path, index=False)
+        processed_train_data.to_csv(processed_train_data_path)
+        processed_test_data.to_csv(processed_test_data_path)
     
     else:
-        processed_train_data = pd.read_csv(processed_train_data_path)
-        processed_test_data = pd.read_csv(processed_test_data_path)
+        processed_train_data = pd.read_csv(processed_train_data_path, index_col=dataset_config["id"])
+        processed_test_data = pd.read_csv(processed_test_data_path, index_col=dataset_config["id"])
 
     if main_config["problem_type"] == "regression":
         model = GBRegressor(**gradient_boosting_config)
@@ -128,7 +127,8 @@ def main():
             preds = model.predict(processed_test_data)
         
         output_path = Path(PREDICTIONS_DATA_PATH) / f"{main_config['dataset_name']}_preds.csv"
-        preds.to_csv(output_path, index=False)
+        preds = pd.Series(preds, name=dataset_config["target"], index=processed_test_data.index)
+        preds.to_csv(output_path)
 
 if __name__=="__main__":
     main()
