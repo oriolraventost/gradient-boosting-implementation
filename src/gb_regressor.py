@@ -65,8 +65,8 @@ class GBRegressor:
         self.initial_constant: float | None = None
         self.weak_learners: list[tuple[DecisionTreeRegressor, list]] = []
         
-        self.best_loss: float = float('inf')
-        self.best_iter: int = 0
+        self.best_loss: float | None = None
+        self.best_iter: int | None = None
 
         self.target_mean: float | None = None
         self.target_std: float | None = None
@@ -90,6 +90,9 @@ class GBRegressor:
         y_train = y_train.to_numpy()
         X_valid = X_valid.to_numpy()
         y_valid = y_valid.to_numpy()
+
+        self.best_iter = 0
+        self.best_loss = float('inf')
 
         n_rows_train, n_cols_train = X_train.shape
 
@@ -135,11 +138,7 @@ class GBRegressor:
             
             self.weak_learners.append((weak_learner, colsample_bytree_idx))
             
-            if self._early_stopping_needed(
-                y_valid,
-                valid_preds,
-                iter
-            ):
+            if self._early_stopping_needed(y_valid, valid_preds, iter):
                 break
     
     def predict(self, X: pd.DataFrame) -> np.ndarray:
@@ -250,12 +249,12 @@ class GBRegressor:
         to the predictions for the current iteration.
         
         Args:
-            y_train_sub (pd.Series): Subsampled training target variable.
+            y_train_sub (np.ndarray): Subsampled training target variable.
             train_preds (np.ndarray): Subsampled rolling predictions on the
                 training feature variables.
         
         Returns:
-            pd.Series: Negative gradient of the MSE loss with respect to the
+            np.ndarray: Negative gradient of the MSE loss with respect to the
                 predictions for the current iteration.
         """
         return - derivative_mean_squared_error(y_train_sub, train_preds_sub)
@@ -270,7 +269,7 @@ class GBRegressor:
         improvement stalls.
 
         Args:
-            y_valid (pd.Series): True validation targets.
+            y_valid (np.ndarray): True validation targets.
             valid_preds (np.ndarray): Current predictions for the validation
                 set.
             iter (int): Current iteration index.
@@ -299,10 +298,7 @@ class GBRegressor:
             
             valid_count = self.best_iter
             self.weights = self.weights[:valid_count + 1]
-            self.decision_trees = self.decision_trees[:valid_count]
-
-            self.best_iter = 0
-            self.best_loss = float('inf')
+            self.weak_learners = self.weak_learners[:valid_count]
             
             return True
             

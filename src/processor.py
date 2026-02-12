@@ -49,7 +49,6 @@ class Processor:
         Args:
             data (pd.DataFrame): The input dataframe to scan.
             target (str): The name of the target variable to exclude.
-            id (str): The name of the ID column to exclude.
         """
         self.num_cols = [
             col for col in data.select_dtypes(exclude=["object", "bool"])
@@ -97,7 +96,6 @@ class Processor:
             train_data (pd.DataFrame): The raw training dataset.
             test_data (pd.DataFrame): The raw testing dataset.
             target (str): The column name of the dependent variable.
-            id (str): The column name for unique identifiers.
 
         Returns:
             tuple[pd.DataFrame, pd.DataFrame]: A tuple containing the
