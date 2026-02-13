@@ -3,7 +3,7 @@ import joblib
 import numpy as np
 import pandas as pd
 
-from sklearn.metrics import log_loss
+from sklearn.metrics import log_loss, accuracy_score
 from sklearn.tree import DecisionTreeRegressor
 from sklearn.utils.extmath import softmax
 
@@ -297,10 +297,15 @@ class GBClassifier:
             labels=np.arange(valid_preds.shape[1])
         )
 
+        predicted_classes = np.argmax(valid_probabilities, axis=1)
+        current_accuracy = accuracy_score(y_valid, predicted_classes)
+
         if not (iter + 1) % 1:
             logger.info(
                 f"Iteration: {iter+1} | "
-                f"CE validation loss: {current_loss:.4f}"
+                f"CE validation loss: {current_loss:.6f} | "
+                f"Accuracy validation loss: {current_accuracy:.6f} | "
+
             )
 
         if current_loss < self.best_loss:

@@ -7,56 +7,38 @@ from pathlib import Path
 from sklearn.model_selection import train_test_split
 
 from src import *
+from src.data_loader import DataLoader
 from src.processor import Processor
 from src.gb_regressor import GBRegressor
 from src.gb_classifier import GBClassifier
+from src.utils import preprocess
 
 def main():
-    """Main workflow for loading data, training, and generating predictions with gradient boosting.
-    
-    This function implements a configuration-driven pipeline that:
-    1. Loads project settings and dataset metadata from YAML files.
-    2. Handles data ingestion and conditional preprocessing using the Processor class.
-    3. Dynamically instantiates models based on the problem type (regression vs. classification).
-    4. Executes training with a 20% validation split for early stopping.
-    5. Manages a Model Registry (JSON) to track the best-performing model versions.
-    6. Generates and exports predictions for the test set.
+    """Main workflow for loading data, training, and generating predictions
+    with gradient boosting.
     """
-    with open(MAIN_CONFIG_PATH, "r") as f:
-        main_config = yaml.safe_load(f)
-    
-    with open(GRADIENT_BOOSTING_CONFIG_PATH, "r") as f:
-        gradient_boosting_config = yaml.safe_load(f)
-    
-    with open(DATASETS_CONFIG_PATH, "r") as f:
-        dataset_config = yaml.safe_load(f)[main_config["dataset_name"]]
-    
-    with open(NEURAL_NETWORK_CONFIG_PATH, "r") as f:
-        neural_network_config = yaml.safe_load(f)
+    with open(CONFIG_PATH, "r") as f:
+        config = yaml.safe_load(f)
 
-    raw_train_data_path = Path(RAW_DATA_PATH) / f"{main_config['dataset_name']}_train.csv"
-    raw_test_data_path = Path(RAW_DATA_PATH) / f"{main_config['dataset_name']}_test.csv"
+    data_loader = DataLoader(dataset_name=config["main"]["active_dataset"])
+    raw_train, raw_test = data_loader.load_raw_data()
 
-    processed_train_data_path = Path(PROCESSED_DATA_PATH) / f"{main_config['dataset_name']}_train.csv"
-    processed_test_data_path = Path(PROCESSED_DATA_PATH) / f"{main_config['dataset_name']}_test.csv"
-    
-    raw_train_data = pd.read_csv(raw_train_data_path, index_col=dataset_config["id"])
-    raw_test_data = pd.read_csv(raw_test_data_path, index_col=dataset_config["id"])
-
-    if main_config["preprocess"]:
+    if config["main"]["run_preprocess"]:
         processor = Processor()
-        processed_train_data, processed_test_data = processor.run(
-            train_data=raw_train_data,
-            test_data=raw_test_data,
-            target=dataset_config["target"]
+        processed_train_data, processed_test_data = preprocess(
+            raw_train_features,
+            raw_train_labels,
+            raw_test_features,
+            dataset_config["target"],
+            dataset_config["id"]
         )
 
-        processed_train_data.to_csv(processed_train_data_path)
-        processed_test_data.to_csv(processed_test_data_path)
+        processed_train_data.to_csv(processed_train_data_path, index=False)
+        processed_test_data.to_csv(processed_test_data_path, index=False)
     
     else:
-        processed_train_data = pd.read_csv(processed_train_data_path, index_col=dataset_config["id"])
-        processed_test_data = pd.read_csv(processed_test_data_path, index_col=dataset_config["id"])
+        processed_train_data = pd.read_csv(processed_train_data_path)
+        processed_test_data = pd.read_csv(processed_test_data_path)
 
     if main_config["problem_type"] == "regression":
         model = GBRegressor(**gradient_boosting_config)
@@ -80,7 +62,7 @@ def main():
         end_time = datetime.now()
         formatted_end_timestamp = end_time.strftime("%Y_%m_%d_%H_%M")
 
-        model_dir = Path(f"models/{main_config['dataset_name']}")
+        model_dir = Path(MODELS_PATH)
         model_dir.mkdir(parents=True, exist_ok=True)
 
         model_path = model_dir / f"{formatted_end_timestamp}.joblib"
@@ -120,15 +102,15 @@ def main():
             except (json.JSONDecodeError, FileNotFoundError):
                 registry = {}
             
-            best_model_filename = registry.get(main_config["dataset_name"], {}).get("best")
-            best_model_path = Path(MODELS_PATH) / main_config['dataset_name'] / f"{best_model_filename}.joblib"
+            best_model_filename = registry.get("best")
+            best_model_path = Path(MODELS_PATH) / f"{best_model_filename}.joblib"
 
             model.load_model(best_model_path)
             preds = model.predict(processed_test_data)
         
-        output_path = Path(PREDICTIONS_DATA_PATH) / f"{main_config['dataset_name']}_preds.csv"
-        preds = pd.Series(preds, name=dataset_config["target"], index=processed_test_data.index)
-        preds.to_csv(output_path)
+        output_path = Path(PREDICTIONS_DATA_PATH) / "preds.csv"
+        submission[dataset_config["target"]] = preds.astype(int)
+        submission.to_csv(output_path, index=False)
 
 if __name__=="__main__":
     main()

@@ -1,0 +1,27 @@
+main:
+  active_dataset: "water"
+  problem_type: "classification"
+  run_preprocess: false
+  run_train: false
+  run_predict: true
+
+datasets:
+  water:
+    target: "status_group"
+    id_column: "id"
+  insurance:
+    target: "premium_amount"
+    id_column: "id"
+
+gradient_boosting:
+  n_estimators: 20000
+  learning_rate: 0.01
+  subsample: 0.8
+  colsample_bytree: 0.8
+  early_stopping_rounds: 20
+  max_depth: 4
+
+neural_network:
+  epochs: 5
+  learning_rate: 0.01
+  weight_decay: 0.001

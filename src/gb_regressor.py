@@ -279,10 +279,10 @@ class GBRegressor:
         """
         current_loss = mean_squared_error(y_valid, valid_preds)
 
-        if not (iter + 1) % 1:
+        if not (iter + 1) % 10:
             logger.info(
                 f"Iteration: {iter+1} | "
-                f"MSE validation loss: {current_loss:.4f}"
+                f"MSE validation loss: {current_loss:.6f}"
             )
 
         if current_loss < self.best_loss:
@@ -297,7 +297,6 @@ class GBRegressor:
             )
             
             valid_count = self.best_iter
-            self.weights = self.weights[:valid_count + 1]
             self.weak_learners = self.weak_learners[:valid_count]
             
             return True

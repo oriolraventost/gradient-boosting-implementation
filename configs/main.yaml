@@ -1,5 +1,0 @@
-dataset_name: "insurance"
-problem_type: "regression"
-preprocess: False
-train: True
-predict: False
