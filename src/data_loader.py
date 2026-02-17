@@ -1,6 +1,11 @@
 import pandas as pd
+import json
 
 from pathlib import Path
+
+from src import *
+from src.gb_regressor import GBRegressor
+from src.gb_classifier import GBClassifier
 
 class DataLoader:
     """Handles the ingestion and persistence of dataset files.
@@ -11,20 +16,25 @@ class DataLoader:
     Attributes:
         raw_dir (Path): Directory where original dataset files are stored.
         processed_dir (Path): Directory where processed CSVs are saved.
-        id (str): The column name used as the identifier.
+        model_dir (Path): Directory where trained models are saved.
+        id_column (str): The column name used as the identifier.
+        target (str): The column name for the target variable.
     """
 
-    def __init__(self, dataset_name: str, id_column: str):
+    def __init__(self, dataset_name: str, id_column: str, target: str):
         """Initializes the DataLoader with project-specific paths.
 
         Args:
             dataset_name: The folder name for the specific dataset.
             id: The name of the ID column to be used as the DataFrame index.
         """
-        self.raw_dir = Path(f"data/{dataset_name}/raw")
-        self.processed_dir = Path(f"data/{dataset_name}/processed")
+        self.raw_dir = Path(DATA_PATH) / f"{dataset_name}/raw"
+        self.processed_dir = Path(DATA_PATH) / f"{dataset_name}/processed"
         self.processed_dir.mkdir(parents=True, exist_ok=True)
+        self.model_dir = Path(MODELS_PATH) / f"{dataset_name}"
+        self.model_dir.mkdir(parents=True, exist_ok=True)
         self.id_column = id_column
+        self.target = target
     
     def load_raw_data(self) -> tuple[pd.DataFrame, pd.DataFrame]:
         """Loads raw data by detecting either combined or split
@@ -112,3 +122,71 @@ class DataLoader:
         )
 
         return train, test
+    
+    def save_model(
+        self,
+        model: GBRegressor | GBClassifier,
+        test_data: pd.DataFrame,
+        start_timestamp: str,
+        end_timestamp: str,
+        gradient_boosting_config: dict,
+        weak_learner_config: dict
+    ) -> None:
+        """Serializes the model and exports all associated run artifacts.
+
+        This method creates a timestamped directory and saves the trained
+        model weights, a metadata JSON containing performance metrics and
+        configurations, and a CSV of predictions generated from the provided
+        test data.
+
+        Args:
+            model (GBRegressor | GBClassifier): The trained gradient boosting
+                model instance.
+            test_data (pd.DataFrame): The test dataset used to generate final
+                predictions.
+            start_timestamp (str): String indicating when training began.
+            end_timestamp (str): String indicating when training finished.
+            gradient_boosting_config (dict): Hyperparameters for the boosting
+                algorithm.
+            weak_learner_config (dict): Hyperparameters for the weak learners.
+        """
+        model_path = self.model_dir / f"{end_timestamp}"
+        model_path.mkdir(parents=True, exist_ok=True)
+
+
+        model.save_model(str(model_path / "model.joblib"))
+
+        if isinstance(model, GBClassifier):
+            problem_type = "classification"
+            best_score = {
+                "best_ce": round(model.best_ce, 6),
+                "best_accuracy": round(model.best_accuracy, 6)
+            }
+        
+        else:
+            problem_type = "regression"
+            best_score = {"best_mse": round(model.best_mse, 6)}
+
+        info = {
+            "run_metadata": {
+                "problem_type": problem_type,
+                "best_iter": model.best_iter,
+                **best_score,
+                "start_timestamp": start_timestamp,
+                "end_timestamp": end_timestamp
+            },
+            "gradient_boosting_config": gradient_boosting_config,
+            "weak_learner_config": weak_learner_config,
+            }
+            
+        with open(str(model_path / "info.json"), 'w', encoding='utf-8') as file:
+            json.dump(info, file, indent=4)
+
+        preds = model.predict(test_data)
+    
+        output = pd.DataFrame({
+            self.id_column: test_data.index,
+            self.target: preds
+        })
+
+        output.to_csv(str(model_path / "test_preds.csv"), index=False)

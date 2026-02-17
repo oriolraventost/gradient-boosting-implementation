@@ -24,6 +24,8 @@ class GBRegressor:
     variable to mean 0 and std 1.
 
     Attributes:
+        weak_learner_key (str): Weak learner to use (decision_tree or
+            neural_network).
         n_estimators (int): Maximum number of boosting stages.
         learning_rate (float): Step size shrinkage used in update.
         subsample (float): Fraction of observations to use for each
@@ -32,14 +34,14 @@ class GBRegressor:
             each weak learner.
         early_stopping_rounds (int): Maximum number of non-improving
                 iterations allowed.
-        max_depth (int): Maximum depth of trees.
+        weak_learner_config (dict): Hyperparameters of weak learner.
         initial_constant (float): Initial constant of boosting ensemble.
-        weak_learners (list[tuple(DecisionTreeRegressor, np.ndarray)]): The
-            collection of weak learners fitted during training and the
-            features they were fitted on.
-        best_loss (float): The minimum Mean Squared Error recorded on the 
+        weak_learners (list[tuple[DecisionTreeRegressor | NNRegressor,
+            list]]): The collection of weak learners fitted during
+            training and the features they were fitted on.
+        best_mse (float): The minimum Mean Squared Error recorded on the 
             validation set.
-        best_iter (int): The iteration index that yielded the best_loss.
+        best_iter (int): The iteration index that yielded the best_mse.
         target_mean (float): Mean of the target variable in the training data.
         target_std (float): Standard deviation of the target variable in the
             training data.
@@ -47,25 +49,29 @@ class GBRegressor:
 
     def __init__(
         self,
+        weak_learner_key: str,
         n_estimators: int,
         learning_rate: float,
         subsample: float,
         colsample_bytree: float,
         early_stopping_rounds: int,
-        max_depth: int
+        weak_learner_config: dict
     ):
         """Initializes the model structure."""
+        self.weak_learner_key: str = weak_learner_key
         self.n_estimators: int = n_estimators
         self.learning_rate: float = learning_rate
         self.subsample: float = subsample
         self.colsample_bytree: float = colsample_bytree
         self.early_stopping_rounds: int = early_stopping_rounds
-        self.max_depth: int = max_depth
+        self.weak_learner_config: dict = weak_learner_config
         
         self.initial_constant: float | None = None
-        self.weak_learners: list[tuple[DecisionTreeRegressor, list]] = []
+        self.weak_learners: list[
+            tuple[DecisionTreeRegressor | NNRegressor, list]
+        ] = []
         
-        self.best_loss: float | None = None
+        self.best_mse: float | None = None
         self.best_iter: int | None = None
 
         self.target_mean: float | None = None
@@ -87,12 +93,13 @@ class GBRegressor:
             y_valid (pd.Series): Validation target variable.
         """
         X_train = X_train.to_numpy()
-        y_train = y_train.to_numpy()
         X_valid = X_valid.to_numpy()
+
+        y_train = y_train.to_numpy()
         y_valid = y_valid.to_numpy()
 
         self.best_iter = 0
-        self.best_loss = float('inf')
+        self.best_mse = float('inf')
 
         n_rows_train, n_cols_train = X_train.shape
 
@@ -107,7 +114,7 @@ class GBRegressor:
         train_preds = np.full(len(y_train), self.initial_constant)
         valid_preds = np.full(len(y_valid), self.initial_constant)
 
-        for iter in range(self.n_estimators):            
+        for iter in range(1, self.n_estimators + 1):            
             subsample_idx, colsample_bytree_idx = self._draw_subsample(
                 n_rows_train,
                 n_cols_train
@@ -118,12 +125,7 @@ class GBRegressor:
                 train_preds[subsample_idx]
             )
             
-            weak_learner = DecisionTreeRegressor(
-                max_depth=self.max_depth,
-                random_state=42
-            )
-
-            weak_learner.fit(
+            weak_learner = self._fit_weak_learner(
                 X_train[subsample_idx][:, colsample_bytree_idx],
                 pseudo_residuals
             )
@@ -259,6 +261,33 @@ class GBRegressor:
         """
         return - derivative_mean_squared_error(y_train_sub, train_preds_sub)
 
+    def _fit_weak_learner(
+        self,
+        X: pd.DataFrame,
+        y: pd.DataFrame
+    ) -> DecisionTreeRegressor | NNRegressor:
+        """Initializes and trains a weak learner.
+
+        This internal method handles the factory logic for selecting the weak
+        learner  type and fitting it to the provided data.
+
+        Args:
+            X (pd.DataFrame): The features for the current boosting iteration.
+            y (pd.DataFrame): The target (usually pseudo-residuals) to fit.
+
+        Returns:
+            DecisionTreeRegressor | NNRegressor: A trained weak learner
+                instance.
+        """
+        if self.weak_learner_key == "decision_tree":
+            weak_learner = DecisionTreeRegressor(**self.weak_learner_config)
+        
+        else:
+            weak_learner = NNRegressor(**self.weak_learner_config)
+
+        weak_learner.fit(X, y)
+        return weak_learner
+    
     def _early_stopping_needed(
         self,
         y_valid: np.ndarray,
@@ -277,16 +306,16 @@ class GBRegressor:
         Returns:
             bool: True if training should terminate, False otherwise.
         """
-        current_loss = mean_squared_error(y_valid, valid_preds)
+        current_mse = mean_squared_error(y_valid, valid_preds)
 
-        if not (iter + 1) % 10:
+        if not iter % 1:
             logger.info(
-                f"Iteration: {iter+1} | "
-                f"MSE validation loss: {current_loss:.6f}"
+                f"Iteration: {iter} | "
+                f"MSE validation loss: {current_mse:.6f}"
             )
 
-        if current_loss < self.best_loss:
-            self.best_loss = current_loss
+        if current_mse < self.best_mse:
+            self.best_mse = current_mse
             self.best_iter = iter
             return False
         

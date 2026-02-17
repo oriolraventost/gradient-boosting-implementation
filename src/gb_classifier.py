@@ -6,7 +6,9 @@ import pandas as pd
 from sklearn.metrics import log_loss, accuracy_score
 from sklearn.tree import DecisionTreeRegressor
 from sklearn.utils.extmath import softmax
+from sklearn.preprocessing import LabelEncoder
 
+from src.nn_regressor import NNRegressor
 from src.utils import derivative_log_loss
 
 logger = logging.getLogger(__name__)
@@ -24,6 +26,8 @@ class GBClassifier:
     gradient (pseudo-residuals) of the previous iterations.
 
     Attributes:
+        weak_learner_key (str): Weak learner to use (decision_tree or
+            neural_network).
         n_estimators (int): Maximum number of boosting stages.
         learning_rate (float): Step size shrinkage used in update.
         subsample (float): Fraction of observations to use for each
@@ -32,37 +36,46 @@ class GBClassifier:
             each weak learner.
         early_stopping_rounds (int): Maximum number of non-improving
                 iterations allowed.
-        max_depth (int): Maximum depth of trees.
+        weak_learner_config (dict): Hyperparameters of weak learner.
         initial_constant (float): Initial constant of boosting ensemble.
         weak_learners (list[tuple(DecisionTreeRegressor, np.ndarray)]): The
             collection of weak learners fitted during training and the
             features they were fitted on.
-        best_loss (float): The minimum Mean Squared Error recorded on the 
+        label_encoder (LabelEncoder): Label encoder to transform categories
+            into numbers before one-hot encoding target.
+        best_ce (float): The minimum Cross Entropy recorded on the 
             validation set.
-        best_iter (int): The iteration index that yielded the best_loss.
+        best_accuracy (float): The accuracy recorded when Cross Entropy was
+            the lowest.
+        best_iter (int): The iteration index that yielded the best_ce.
     """
 
     def __init__(
         self,
+        weak_learner_key: str,
         n_estimators: int,
         learning_rate: float,
         subsample: float,
         colsample_bytree: float,
         early_stopping_rounds: int,
-        max_depth: int
+        weak_learner_config: dict
     ):
         """Initializes the gradient boosting classifier."""
+        self.weak_learner_key: str = weak_learner_key
         self.n_estimators: int = n_estimators
         self.learning_rate: float = learning_rate
         self.subsample: float = subsample
         self.colsample_bytree: float = colsample_bytree
         self.early_stopping_rounds: int = early_stopping_rounds
-        self.max_depth: int = max_depth
+        self.weak_learner_config = weak_learner_config
         
         self.initial_constant: float | None = None
         self.weak_learners: list[tuple[DecisionTreeRegressor, list]] = []
+
+        self.label_encoder: LabelEncoder = LabelEncoder()
         
-        self.best_loss: float | None = None
+        self.best_ce: float | None = None
+        self.best_accuracy: float | None = None
         self.best_iter: int | None = None
 
     def fit(
@@ -81,12 +94,14 @@ class GBClassifier:
             y_valid (pd.Series): Validation labels for early stopping.
         """
         X_train = X_train.to_numpy()
-        y_train = y_train.to_numpy()
         X_valid = X_valid.to_numpy()
-        y_valid = y_valid.to_numpy()
+
+        y_train = self.label_encoder.fit_transform(y_train)
+        y_valid = self.label_encoder.transform(y_valid)
 
         self.best_iter = 0
-        self.best_loss = float('inf')
+        self.best_ce = float('inf')
+        self.best_accuracy = 0.0
 
         n_rows_train, n_cols_train = X_train.shape
         
@@ -102,7 +117,7 @@ class GBClassifier:
             self.initial_constant
         )
 
-        for iter in range(self.n_estimators):            
+        for iter in range(1, self.n_estimators + 1):            
             subsample_idx, colsample_bytree_idx = self._draw_subsample(
                 n_rows_train,
                 n_cols_train
@@ -113,12 +128,7 @@ class GBClassifier:
                 train_preds[subsample_idx]
             )
             
-            weak_learner = DecisionTreeRegressor(
-                max_depth=self.max_depth, 
-                random_state=42
-            )
-            
-            weak_learner.fit(
+            weak_learner = self._fit_weak_learner(
                 X_train[subsample_idx][:, colsample_bytree_idx],
                 pseudo_residuals
             )
@@ -147,7 +157,7 @@ class GBClassifier:
         """
         proba_preds = self.predict_proba(X)
         preds = np.argmax(proba_preds, axis=1)
-        return preds
+        return self.label_encoder.inverse_transform(preds)
     
     def predict_proba(self, X: pd.DataFrame) -> np.ndarray:
         """Aggregates predictions from the base learners.
@@ -271,6 +281,33 @@ class GBClassifier:
                 predictions for the current iteration.
         """
         return - derivative_log_loss(y_train_sub, train_preds_sub)
+    
+    def _fit_weak_learner(
+        self,
+        X: pd.DataFrame,
+        y: pd.DataFrame
+    ) -> DecisionTreeRegressor | NNRegressor:
+        """Initializes and trains a weak learner.
+
+        This internal method handles the factory logic for selecting the weak
+        learner  type and fitting it to the provided data.
+
+        Args:
+            X (pd.DataFrame): The features for the current boosting iteration.
+            y (pd.DataFrame): The target (usually pseudo-residuals) to fit.
+
+        Returns:
+            DecisionTreeRegressor | NNRegressor: A trained weak learner
+                instance.
+        """
+        if self.weak_learner_key == "decision_tree":
+            weak_learner = DecisionTreeRegressor(**self.weak_learner_config)
+        
+        else:
+            weak_learner = NNRegressor(**self.weak_learner_config)
+
+        weak_learner.fit(X, y)
+        return weak_learner
 
     def _early_stopping_needed(
         self,
@@ -291,7 +328,7 @@ class GBClassifier:
             bool: True if training should terminate, False otherwise.
         """
         valid_probabilities = softmax(valid_preds)
-        current_loss = log_loss(
+        current_ce = log_loss(
             y_valid,
             valid_probabilities,
             labels=np.arange(valid_preds.shape[1])
@@ -300,16 +337,17 @@ class GBClassifier:
         predicted_classes = np.argmax(valid_probabilities, axis=1)
         current_accuracy = accuracy_score(y_valid, predicted_classes)
 
-        if not (iter + 1) % 1:
+        if not iter % 1:
             logger.info(
-                f"Iteration: {iter+1} | "
-                f"CE validation loss: {current_loss:.6f} | "
-                f"Accuracy validation loss: {current_accuracy:.6f} | "
+                f"Iteration: {iter} | "
+                f"CE validation loss: {current_ce:.6f} | "
+                f"Accuracy validation loss: {current_accuracy:.6f}"
 
             )
 
-        if current_loss < self.best_loss:
-            self.best_loss = current_loss
+        if current_ce < self.best_ce:
+            self.best_ce = current_ce
+            self.best_accuracy = current_accuracy
             self.best_iter = iter
             return False
         
