@@ -14,7 +14,7 @@ datasets:
     problem_type: "regression"
 
 gradient_boosting:
-  weak_learner_key: "decision_tree"
+  weak_learner_key: "neural_network"
   n_estimators: 3
   learning_rate: 0.01
   subsample: 0.8
@@ -29,3 +29,5 @@ neural_network:
   epochs: 5
   learning_rate: 0.01
   weight_decay: 0.001
+  hidden_size: 512
+  batch_size: 1024
