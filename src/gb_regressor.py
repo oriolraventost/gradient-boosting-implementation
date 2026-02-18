@@ -174,6 +174,7 @@ class GBRegressor:
         """
         model_data = {
             "initial_constant": self.initial_constant,
+            "learning_rate": self.learning_rate,
             "weak_learners": self.weak_learners
             }
         
@@ -190,6 +191,7 @@ class GBRegressor:
         logger.info(f"Model loaded from {file_path}")
         
         self.initial_constant = model_data["initial_constant"]
+        self.learning_rate = model_data["learning_rate"]
         self.weak_learners = model_data["weak_learners"]
     
     def _compute_initial_constant(self, y_train: np.ndarray) -> float:
@@ -269,7 +271,7 @@ class GBRegressor:
         """Initializes and trains a weak learner.
 
         This internal method handles the factory logic for selecting the weak
-        learner  type and fitting it to the provided data.
+        learner type and fitting it to the provided data.
 
         Args:
             X (pd.DataFrame): The features for the current boosting iteration.
@@ -282,8 +284,13 @@ class GBRegressor:
         if self.weak_learner_key == "decision_tree":
             weak_learner = DecisionTreeRegressor(**self.weak_learner_config)
         
-        else:
+        elif self.weak_learner_key == "neural_network":
             weak_learner = NNRegressor(**self.weak_learner_config)
+        
+        else:
+            raise ValueError(
+                f"Invalid weak learner key: {self.weak_learner_key}"
+            )
 
         weak_learner.fit(X, y)
         return weak_learner
@@ -324,10 +331,8 @@ class GBRegressor:
                 f"Early stopping triggered at iteration {iter}. "
                 f"Best iteration: {self.best_iter}"
             )
-            
-            valid_count = self.best_iter
-            self.weak_learners = self.weak_learners[:valid_count]
-            
+
+            self.weak_learners = self.weak_learners[:self.best_iter]
             return True
             
         return False

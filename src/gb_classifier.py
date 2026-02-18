@@ -146,28 +146,29 @@ class GBClassifier:
                 break
     
     def predict(self, X: pd.DataFrame) -> np.ndarray:
-        """Aggregates predictions from the base learners.
+        """Predict class labels for samples in X.
         
         Args:
             X (pd.DataFrame): Features to generate predictions for.
 
         Returns:
-            np.ndarray: Probability distribution over all the classes
-                for each observation.
+            np.ndarray: Predicted class labels.
         """
         proba_preds = self.predict_proba(X)
         preds = np.argmax(proba_preds, axis=1)
         return self.label_encoder.inverse_transform(preds)
     
     def predict_proba(self, X: pd.DataFrame) -> np.ndarray:
-        """Aggregates predictions from the base learners.
+        """Predict class probabilities for samples in X.
+
+        The predicted class probabilities of an input sample are computed as 
+        the softmax of the weighted sum of predictions from the base learners.
         
         Args:
             X (pd.DataFrame): Features to generate predictions for.
 
         Returns:
-            np.ndarray: Probability distribution over all the classes
-                for each observation.
+            np.ndarray: The class probabilities of the input samples.
         """
         X = X.to_numpy()
 
@@ -192,6 +193,7 @@ class GBClassifier:
         """
         model_data = {
             "initial_constant": self.initial_constant,
+            "learning_rate": self.learning_rate,
             "weak_learners": self.weak_learners
             }
         
@@ -208,6 +210,7 @@ class GBClassifier:
         logger.info(f"Model loaded from {file_path}")
         
         self.initial_constant = model_data["initial_constant"]
+        self.learning_rate = model_data["learning_rate"]
         self.weak_learners = model_data["weak_learners"]
     
     def _compute_initial_constant(self, y_train: np.ndarray) -> np.ndarray:
@@ -290,7 +293,7 @@ class GBClassifier:
         """Initializes and trains a weak learner.
 
         This internal method handles the factory logic for selecting the weak
-        learner  type and fitting it to the provided data.
+        learner type and fitting it to the provided data.
 
         Args:
             X (pd.DataFrame): The features for the current boosting iteration.
@@ -303,8 +306,13 @@ class GBClassifier:
         if self.weak_learner_key == "decision_tree":
             weak_learner = DecisionTreeRegressor(**self.weak_learner_config)
         
-        else:
+        elif self.weak_learner_key == "neural_network":
             weak_learner = NNRegressor(**self.weak_learner_config)
+        
+        else:
+            raise ValueError(
+                f"Invalid weak learner key: {self.weak_learner_key}"
+            )
 
         weak_learner.fit(X, y)
         return weak_learner
@@ -356,11 +364,8 @@ class GBClassifier:
                 f"Early stopping triggered at iteration {iter}. "
                 f"Best iteration: {self.best_iter}"
             )
-            
-            valid_count = self.best_iter
-            self.weights = self.weights[:valid_count + 1]
-            self.weak_learners = self.weak_learners[:valid_count]
-            
+
+            self.weak_learners = self.weak_learners[:self.best_iter]
             return True
             
         return False
