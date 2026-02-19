@@ -42,8 +42,9 @@ class GBRegressor:
         best_mse (float): The minimum Mean Squared Error recorded on the 
             validation set.
         best_iter (int): The iteration index that yielded the best_mse.
-        target_mean (float): Mean of the target variable in the training data.
-        target_std (float): Standard deviation of the target variable in the
+        target_min (float): Minimum value of the target variable in the
+            training data.
+        target_max (float): Maximum value of the target variable in the
             training data.
     """
 
@@ -74,8 +75,8 @@ class GBRegressor:
         self.best_mse: float | None = None
         self.best_iter: int | None = None
 
-        self.target_mean: float | None = None
-        self.target_std: float | None = None
+        self.target_min: float | None = None
+        self.target_max: float | None = None
 
     def fit(
         self,
@@ -103,11 +104,13 @@ class GBRegressor:
 
         n_rows_train, n_cols_train = X_train.shape
 
-        self.target_mean = y_train.mean()
-        self.target_std = y_train.std()
+        self.target_min = y_train.min()
+        self.target_max = y_train.max()
 
-        y_train = (y_train - self.target_mean) / self.target_std
-        y_valid = (y_valid - self.target_mean) / self.target_std
+        factor = self.target_max - self.target_min
+
+        y_train = (y_train - self.target_min) / factor
+        y_valid = (y_valid - self.target_min) / factor
 
         self.initial_constant = self._compute_initial_constant(y_train)
         
@@ -130,13 +133,17 @@ class GBRegressor:
                 pseudo_residuals
             )
             
-            train_preds += self.learning_rate * weak_learner.predict(
+            train_update = self.learning_rate * weak_learner.predict(
                 X_train[:, colsample_bytree_idx]
             )
-            
-            valid_preds += self.learning_rate * weak_learner.predict(
+
+            train_preds += train_update.reshape(train_preds.shape)
+
+            valid_update = self.learning_rate * weak_learner.predict(
                 X_valid[:, colsample_bytree_idx]
             )
+            
+            valid_preds += valid_update.reshape(valid_preds.shape)
             
             self.weak_learners.append((weak_learner, colsample_bytree_idx))
             
@@ -158,11 +165,14 @@ class GBRegressor:
         preds = np.full(len(X), self.initial_constant)
 
         for (weak_learner, colsample_bytree_idx) in self.weak_learners:
-            preds += self.learning_rate * weak_learner.predict(
+            update = self.learning_rate * weak_learner.predict(
                 X[:, colsample_bytree_idx]
             )
 
-        scaled_preds = self.target_std * preds + self.target_mean
+            preds += update.reshape(preds.shape)
+
+        factor = self.target_max - self.target_min
+        scaled_preds = factor * preds + self.target_min
         return scaled_preds
 
     def save_model(self, file_path: str) -> None:

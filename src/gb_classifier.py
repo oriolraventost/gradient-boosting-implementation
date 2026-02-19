@@ -133,12 +133,17 @@ class GBClassifier:
                 pseudo_residuals
             )
             
-            train_preds += self.learning_rate * weak_learner.predict(
+            train_update = self.learning_rate * weak_learner.predict(
                 X_train[:, colsample_bytree_idx]
             )
-            valid_preds += self.learning_rate * weak_learner.predict(
+
+            train_preds += train_update.reshape(train_preds.shape)
+
+            valid_update = self.learning_rate * weak_learner.predict(
                 X_valid[:, colsample_bytree_idx]
             )
+            
+            valid_preds += valid_update.reshape(valid_preds.shape)
             
             self.weak_learners.append((weak_learner, colsample_bytree_idx))
             
@@ -178,9 +183,11 @@ class GBClassifier:
         )
 
         for (weak_learner, colsample_bytree_idx) in self.weak_learners:
-            proba_preds += self.learning_rate * weak_learner.predict(
+            update = self.learning_rate * weak_learner.predict(
                 X[:, colsample_bytree_idx]
             )
+
+            proba_preds += update.reshape(proba_preds.shape)
 
         return softmax(proba_preds)
 

@@ -1,5 +1,5 @@
 main:
-  active_dataset: "water"
+  active_dataset: "insurance"
   run_preprocess: false
   train_and_predict: true
 
@@ -15,7 +15,7 @@ datasets:
 
 gradient_boosting:
   weak_learner_key: "neural_network"
-  n_estimators: 3
+  n_estimators: 5
   learning_rate: 0.01
   subsample: 0.8
   colsample_bytree: 0.8
@@ -29,5 +29,6 @@ neural_network:
   epochs: 5
   learning_rate: 0.01
   weight_decay: 0.001
+  dropout: 0.1
   hidden_size: 512
   batch_size: 1024

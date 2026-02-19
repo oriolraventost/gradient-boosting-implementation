@@ -24,6 +24,7 @@ class NNRegressor(nn.Module):
         epochs (int): Number of iterations on the full training data.
         learning_rate (float): Learning rate for the gradient descent updates.
         weight_decay (float): Weight regularization parameter.
+        dropout (float): Dropout probability.
         hidden_size (int): Number of units in each hidden layer.
         batch_size (int): Batch size for parallel processing.
         network (nn.Sequential): The core deep learning layers.
@@ -35,6 +36,7 @@ class NNRegressor(nn.Module):
         epochs: int,
         learning_rate: float,
         weight_decay: float,
+        dropout: float,
         hidden_size: int,
         batch_size: int
     ):
@@ -44,6 +46,7 @@ class NNRegressor(nn.Module):
         self.epochs = epochs
         self.learning_rate = learning_rate
         self.weight_decay = weight_decay
+        self.dropout = dropout
         self.hidden_size = hidden_size
         self.batch_size = batch_size
         
@@ -117,7 +120,7 @@ class NNRegressor(nn.Module):
                 
                 optimizer.zero_grad()
                 preds = self(batch_X)
-                loss = criterion(preds, batch_y)
+                loss = criterion(preds, batch_y.view_as(preds))
                 loss.backward()
                 optimizer.step()
                 
@@ -132,7 +135,7 @@ class NNRegressor(nn.Module):
                     v_batch_y = v_batch_y.to(self.device)
                     
                     v_preds = self(v_batch_X)
-                    v_mse = criterion(v_preds, v_batch_y)
+                    v_mse = criterion(v_preds, v_batch_y.view_as(v_preds))
                     val_mse += v_mse.item()
             
             avg_val = val_mse / len(val_loader)
@@ -186,12 +189,12 @@ class NNRegressor(nn.Module):
             nn.Linear(input_size, self.hidden_size),
             nn.BatchNorm1d(self.hidden_size),
             nn.ReLU(),
-            nn.Dropout(0.3),
+            nn.Dropout(self.dropout),
 
             nn.Linear(self.hidden_size, self.hidden_size),
             nn.BatchNorm1d(self.hidden_size),
             nn.ReLU(),
-            nn.Dropout(0.3),
+            nn.Dropout(self.dropout),
 
             nn.Linear(self.hidden_size, output_size)
         )
