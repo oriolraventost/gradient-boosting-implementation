@@ -9,7 +9,10 @@ from sklearn.utils.extmath import softmax
 from sklearn.preprocessing import LabelEncoder
 
 from src.nn_regressor import NNRegressor
-from src.utils import derivative_log_loss
+from src.utils import (
+    first_derivative_log_loss,
+    second_derivative_log_loss
+)
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(
@@ -34,6 +37,7 @@ class GBClassifier:
             weak learner.
         colsample_bytree (float): Fraction of features to use for 
             each weak learner.
+        reg_lambda (float): L2 regularization term.
         early_stopping_rounds (int): Maximum number of non-improving
                 iterations allowed.
         weak_learner_config (dict): Hyperparameters of weak learner.
@@ -57,6 +61,7 @@ class GBClassifier:
         learning_rate: float,
         subsample: float,
         colsample_bytree: float,
+        reg_lambda: float,
         early_stopping_rounds: int,
         weak_learner_config: dict
     ):
@@ -66,6 +71,7 @@ class GBClassifier:
         self.learning_rate: float = learning_rate
         self.subsample: float = subsample
         self.colsample_bytree: float = colsample_bytree
+        self.reg_lambda: float = reg_lambda
         self.early_stopping_rounds: int = early_stopping_rounds
         self.weak_learner_config = weak_learner_config
         
@@ -278,19 +284,24 @@ class GBClassifier:
         y_train_sub: np.ndarray,
         train_preds_sub: np.ndarray
     ) -> np.ndarray:
-        """Calculates the negative gradient of the loss function with respect
-        to the predictions for the current iteration.
-        
+        """Computes the regularized Newton step for the current iteration.
+
+        Calculates the step using a diagonal Hessian approximation (second-order
+        derivative) with L2 regularization, matching the logic used in 
+        extreme gradient boosting.
+
         Args:
             y_train_sub (np.ndarray): Subsampled training target variable.
-            train_preds (np.ndarray): Subsampled rolling predictions on the
-                training feature variables.
-        
+            train_preds_sub (np.ndarray): Subsampled rolling predictions (logits) 
+                on the training feature variables.
+
         Returns:
-            np.ndarray: Negative gradient of the CE loss with respect to the
-                predictions for the current iteration.
+            np.ndarray: The regularized Newton update (-g / (h + lambda)), 
+                representing the optimal step for the current iteration.
         """
-        return - derivative_log_loss(y_train_sub, train_preds_sub)
+        g = first_derivative_log_loss(y_train_sub, train_preds_sub)
+        h = second_derivative_log_loss(y_train_sub, train_preds_sub)
+        return - g / (h + np.full_like(train_preds_sub, self.reg_lambda))
     
     def _fit_weak_learner(
         self,

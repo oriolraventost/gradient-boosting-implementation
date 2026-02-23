@@ -7,7 +7,10 @@ from sklearn.tree import DecisionTreeRegressor
 from sklearn.metrics import mean_squared_error
 
 from src.nn_regressor import NNRegressor
-from src.utils import derivative_mean_squared_error
+from src.utils import (
+    first_derivative_mean_squared_error,
+    second_derivative_mean_squared_error
+)
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(
@@ -32,6 +35,7 @@ class GBRegressor:
             weak learner.
         colsample_bytree (float): Fraction of features to use for 
             each weak learner.
+        reg_lambda (float): L2 regularization term.
         early_stopping_rounds (int): Maximum number of non-improving
                 iterations allowed.
         weak_learner_config (dict): Hyperparameters of weak learner.
@@ -55,6 +59,7 @@ class GBRegressor:
         learning_rate: float,
         subsample: float,
         colsample_bytree: float,
+        reg_lambda: float,
         early_stopping_rounds: int,
         weak_learner_config: dict
     ):
@@ -64,6 +69,7 @@ class GBRegressor:
         self.learning_rate: float = learning_rate
         self.subsample: float = subsample
         self.colsample_bytree: float = colsample_bytree
+        self.reg_lambda: float = reg_lambda
         self.early_stopping_rounds: int = early_stopping_rounds
         self.weak_learner_config: dict = weak_learner_config
         
@@ -259,8 +265,11 @@ class GBRegressor:
         y_train_sub: np.ndarray,
         train_preds_sub: np.ndarray
     ) -> np.ndarray:
-        """Calculates the negative gradient of the loss function with respect
-        to the predictions for the current iteration.
+        """Computes the regularized Newton step for the current iteration.
+
+        Calculates the step using a diagonal Hessian approximation (second-order
+        derivative) with L2 regularization, matching the logic used in 
+        extreme gradient boosting.
         
         Args:
             y_train_sub (np.ndarray): Subsampled training target variable.
@@ -268,10 +277,12 @@ class GBRegressor:
                 training feature variables.
         
         Returns:
-            np.ndarray: Negative gradient of the MSE loss with respect to the
-                predictions for the current iteration.
+            np.ndarray: The regularized Newton update (-g / (h + lambda)), 
+                representing the optimal step for the current iteration.
         """
-        return - derivative_mean_squared_error(y_train_sub, train_preds_sub)
+        g = first_derivative_mean_squared_error(y_train_sub, train_preds_sub)
+        h = second_derivative_mean_squared_error(y_train_sub, train_preds_sub)
+        return - g / (h + np.full_like(train_preds_sub, self.reg_lambda))
 
     def _fit_weak_learner(
         self,
@@ -328,7 +339,7 @@ class GBRegressor:
         if not iter % 1:
             logger.info(
                 f"Iteration: {iter} | "
-                f"MSE validation loss: {current_mse:.6f}"
+                f"MSE validation loss: {current_mse:.8f}"
             )
 
         if current_mse < self.best_mse:

@@ -1,13 +1,8 @@
 import numpy as np
-import pandas as pd
 
 from sklearn.utils.extmath import softmax
-from sklearn.compose import ColumnTransformer
-from sklearn.pipeline import Pipeline
-from sklearn.impute import SimpleImputer
-from sklearn.preprocessing import OrdinalEncoder, LabelEncoder, StandardScaler
 
-def derivative_mean_squared_error(
+def first_derivative_mean_squared_error(
     y_train: np.ndarray,
     train_preds: np.ndarray
 ) -> np.ndarray:
@@ -23,7 +18,7 @@ def derivative_mean_squared_error(
     return 2 * (train_preds - y_train)
 
 
-def derivative_log_loss(
+def first_derivative_log_loss(
     y_train: np.ndarray,
     train_preds: np.ndarray
 ) -> np.ndarray:
@@ -43,3 +38,37 @@ def derivative_log_loss(
     probability_preds = softmax(train_preds)
     
     return probability_preds - y_train_one_hot
+
+def second_derivative_mean_squared_error(
+    y_train: np.ndarray,
+    train_preds: np.ndarray
+) -> np.ndarray:
+    """Compute the diagonal of the Hessian for Mean Squared Error.
+    
+    Args:
+        y_train (np.ndarray): Ground truth target values.
+        train_preds (np.ndarray): Current ensemble predictions.
+
+    Returns:
+        np.ndarray: The diagonal of the Hessian.
+    """
+    return np.full_like(train_preds, 2.0)
+
+
+def second_derivative_log_loss(
+    y_train: np.ndarray,
+    train_preds: np.ndarray
+) -> np.ndarray:
+    """Compute the diagonal of the Hessian for Softmax Cross-Entropy.
+    
+    Args:
+        y_train (np.ndarray): Categorical ground truth labels.
+        train_preds (np.ndarray): Current logits from the ensemble,
+            where columns represent distinct classes.
+
+    Returns:
+        np.ndarray: The diagonal of the Hessian.
+    """
+    probability_preds = softmax(train_preds)
+    
+    return probability_preds * (1 - probability_preds)

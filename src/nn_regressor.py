@@ -196,8 +196,15 @@ class NNRegressor(nn.Module):
             nn.ReLU(),
             nn.Dropout(self.dropout),
 
+            nn.Linear(self.hidden_size, self.hidden_size),
+            nn.BatchNorm1d(self.hidden_size),
+            nn.ReLU(),
+            nn.Dropout(self.dropout),
+
             nn.Linear(self.hidden_size, output_size)
         )
+
+        self.network.to(self.device)
 
     def _prepare_loaders(
         self,
