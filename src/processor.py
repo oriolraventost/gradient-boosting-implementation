@@ -6,7 +6,7 @@ from sklearn.pipeline import Pipeline
 from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import (
     OneHotEncoder,
-    MinMaxScaler
+    RobustScaler
 )
 
 logger = logging.getLogger(__name__)
@@ -156,7 +156,7 @@ class Processor:
 
         num_pipeline = Pipeline([
             ('impute', SimpleImputer(strategy='median')),
-            ('scale', MinMaxScaler())
+            ('scale', RobustScaler())
         ])
 
         self.transformer = ColumnTransformer(

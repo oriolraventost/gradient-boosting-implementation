@@ -46,9 +46,9 @@ class GBRegressor:
         best_mse (float): The minimum Mean Squared Error recorded on the 
             validation set.
         best_iter (int): The iteration index that yielded the best_mse.
-        target_min (float): Minimum value of the target variable in the
+        target_median (float): Median value of the target variable in the
             training data.
-        target_max (float): Maximum value of the target variable in the
+        target_iqr (float): IQR value of the target variable in the
             training data.
     """
 
@@ -110,13 +110,14 @@ class GBRegressor:
 
         n_rows_train, n_cols_train = X_train.shape
 
-        self.target_min = y_train.min()
-        self.target_max = y_train.max()
+        self.target_median = np.median(y_train)
 
-        factor = self.target_max - self.target_min
+        q1 = np.quantile(y_train, 0.25)
+        q3 = np.quantile(y_train, 0.75)
+        self.target_iqr = q3 - q1
 
-        y_train = (y_train - self.target_min) / factor
-        y_valid = (y_valid - self.target_min) / factor
+        y_train = (y_train - self.target_median) / self.target_iqr
+        y_valid = (y_valid - self.target_median) / self.target_iqr
 
         self.initial_constant = self._compute_initial_constant(y_train)
         
@@ -177,8 +178,7 @@ class GBRegressor:
 
             preds += update.reshape(preds.shape)
 
-        factor = self.target_max - self.target_min
-        scaled_preds = factor * preds + self.target_min
+        scaled_preds = self.target_iqr * preds + self.target_median
         return scaled_preds
 
     def save_model(self, file_path: str) -> None:
