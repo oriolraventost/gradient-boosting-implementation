@@ -228,7 +228,7 @@ class GBClassifier:
     
     def _compute_initial_constant(self, y_train: np.ndarray) -> np.ndarray:
         """Calculates the optimal constant baseline (logarithm of
-        proportions) for CE loss.
+        proportions) for CE loss. Recenters logits to have mean zero.
         
         Args:
             y_train (np.ndarray): Training target variable.
@@ -239,7 +239,8 @@ class GBClassifier:
         """
         _, counts = np.unique(y_train, return_counts=True)
         proportions = counts / len(y_train)
-        return np.log(proportions)
+        logits = np.log(proportions)
+        return logits - np.mean(logits)
 
     def _draw_subsample(
         self,
