@@ -1,5 +1,5 @@
 main:
-  active_dataset: "insurance"
+  active_dataset: "water"
   run_preprocess: false
   train_and_predict: true
 
@@ -15,11 +15,12 @@ datasets:
 
 gradient_boosting:
   weak_learner_key: "neural_network"
-  n_estimators: 5
-  learning_rate: 0.01
+  n_estimators: 10000
+  learning_rate: 0.3
   subsample: 0.8
   colsample_bytree: 0.8
-  early_stopping_rounds: 20
+  reg_lambda: 1.0
+  early_stopping_rounds: 25
 
 decision_tree:
   max_depth: 4
