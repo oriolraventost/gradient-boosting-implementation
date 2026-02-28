@@ -12,6 +12,10 @@ datasets:
     target: "Premium Amount"
     id_column: "id"
     problem_type: "regression"
+  car:
+    target: "price"
+    id_column: "id"
+    problem_type: "regression"
 
 gradient_boosting:
   weak_learner_key: "neural_network"
@@ -27,9 +31,8 @@ decision_tree:
   random_state: 42
 
 neural_network:
-  epochs: 5
+  epochs: 10
   learning_rate: 0.01
-  weight_decay: 0.001
-  dropout: 0.1
-  hidden_size: 512
-  batch_size: 1024
+  max_norm: 1.0
+  hidden_size: 256
+  batch_size: 256

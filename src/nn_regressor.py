@@ -16,15 +16,11 @@ logging.basicConfig(
 
 class NNRegressor(nn.Module):
     """A PyTorch neural network regressor for tabular data.
-    
-    The backend is a Multi-Layer Perceptron (MLP) with Batch Normalization 
-    and Dropout for regularization.
 
     Attributes:
         epochs (int): Number of iterations on the full training data.
         learning_rate (float): Learning rate for the gradient descent updates.
-        weight_decay (float): Weight regularization parameter.
-        dropout (float): Dropout probability.
+        max_norm (float): Maximum gradient norm for clipping
         hidden_size (int): Number of units in each hidden layer.
         batch_size (int): Batch size for parallel processing.
         network (nn.Sequential): The core deep learning layers.
@@ -35,8 +31,7 @@ class NNRegressor(nn.Module):
         self,
         epochs: int,
         learning_rate: float,
-        weight_decay: float,
-        dropout: float,
+        max_norm: float,
         hidden_size: int,
         batch_size: int
     ):
@@ -45,8 +40,7 @@ class NNRegressor(nn.Module):
         
         self.epochs = epochs
         self.learning_rate = learning_rate
-        self.weight_decay = weight_decay
-        self.dropout = dropout
+        self.max_norm = max_norm
         self.hidden_size = hidden_size
         self.batch_size = batch_size
         
@@ -71,41 +65,31 @@ class NNRegressor(nn.Module):
         return self.network(x)
 
     def fit(self, X: np.ndarray, y: np.ndarray) -> None:
-        """Trains the network using an AdamW optimizer and OneCycleLR
-        scheduler.
-        
-        The training process includes internal validation splitting and
-        restores the weights from the epoch with the lowest validation loss.
+        """Trains the network using an Adam optimizer and OneCycleLR
+        scheduler. Includes gradient norm clipping.
 
         Args:
             X (np.ndarray): Features.
             y (np.ndarray): Labels.
         """
+        torch.manual_seed(42)
+
         input_size = X.shape[1]
         output_size = y.shape[1] if len(y.shape) > 1 else 1
 
         self._get_network(input_size, output_size)
 
-        train_loader, val_loader = self._prepare_loaders(X, y)
+        loader = self._prepare_loader(X, y)
         criterion = nn.MSELoss()
 
-        optimizer = optim.AdamW(
-            self.parameters(),
-            lr=self.learning_rate,
-            weight_decay=self.weight_decay
-        )
+        optimizer = optim.Adam(self.parameters(), lr=self.learning_rate)
         
         scheduler = optim.lr_scheduler.OneCycleLR(
             optimizer, 
             max_lr=self.learning_rate, 
-            steps_per_epoch=len(train_loader), 
-            epochs=self.epochs,
-            pct_start=0.3,
-            anneal_strategy='cos'
+            steps_per_epoch=len(loader), 
+            epochs=self.epochs
         )
-        
-        best_val_mse = float('inf')
-        best_model_state = None
         
         logger.info(
             f"Starting training for {self.epochs} epochs on {self.device}."
@@ -114,7 +98,7 @@ class NNRegressor(nn.Module):
         for epoch in range(1, self.epochs + 1):
             self.train()
             train_loss = 0.0
-            for batch_X, batch_y in train_loader:
+            for batch_X, batch_y in loader:
                 batch_X = batch_X.to(self.device)
                 batch_y = batch_y.to(self.device)
                 
@@ -122,39 +106,21 @@ class NNRegressor(nn.Module):
                 preds = self(batch_X)
                 loss = criterion(preds, batch_y.view_as(preds))
                 loss.backward()
-                optimizer.step()
+
+                torch.nn.utils.clip_grad_norm_(
+                    self.parameters(),
+                    max_norm=self.max_norm
+                )
                 
+                optimizer.step()
                 scheduler.step()
                 train_loss += loss.item()
 
-            self.eval()
-            val_mse = 0.0
-            with torch.no_grad():
-                for v_batch_X, v_batch_y in val_loader:
-                    v_batch_X = v_batch_X.to(self.device)
-                    v_batch_y = v_batch_y.to(self.device)
-                    
-                    v_preds = self(v_batch_X)
-                    v_mse = criterion(v_preds, v_batch_y.view_as(v_preds))
-                    val_mse += v_mse.item()
-            
-            avg_val = val_mse / len(val_loader)
-            
-            if avg_val < best_val_mse:
-                best_val_mse = avg_val
-                best_model_state = copy.deepcopy(self.state_dict())
-                
             current_lr = optimizer.param_groups[0]['lr']
+            avg_train_loss = train_loss / len(loader)
             logger.info(
-                f"Epoch {epoch} | Val MSE: {avg_val:.4f} | "
+                f"Epoch {epoch} | Loss: {avg_train_loss:.4f} | "
                 f"LR: {current_lr:.4f}"
-            )
-
-        if best_model_state:
-            self.load_state_dict(best_model_state)
-            logger.info(
-                f"Training complete. "
-                f"Best Val MSE: {best_val_mse:.4f} restored."
             )
 
     def predict(self, X: np.ndarray) -> np.ndarray:
@@ -187,63 +153,35 @@ class NNRegressor(nn.Module):
         """
         self.network: nn.Sequential = nn.Sequential(
             nn.Linear(input_size, self.hidden_size),
-            nn.BatchNorm1d(self.hidden_size),
-            nn.ReLU(),
-            nn.Dropout(self.dropout),
+            nn.GELU(),
 
             nn.Linear(self.hidden_size, self.hidden_size),
-            nn.BatchNorm1d(self.hidden_size),
-            nn.ReLU(),
-            nn.Dropout(self.dropout),
-
-            nn.Linear(self.hidden_size, self.hidden_size),
-            nn.BatchNorm1d(self.hidden_size),
-            nn.ReLU(),
-            nn.Dropout(self.dropout),
+            nn.GELU(),
 
             nn.Linear(self.hidden_size, output_size)
         )
 
         self.network.to(self.device)
 
-    def _prepare_loaders(
-        self,
-        X: np.ndarray,
+    def _prepare_loader(
+        self, 
+        X: np.ndarray, 
         y: np.ndarray
     ) -> tuple[DataLoader, DataLoader]:
-        """Converts Pandas DataFrames into PyTorch DataLoaders.
+        """Converts NumPy arrays into PyTorch DataLoader.
 
         Args:
-            X (np.ndarray): Features.
-            y (np.ndarray): Labels.
+            X (np.ndarray): Feature matrix of shape (n_samples, n_features).
+            y (np.ndarray): Target vector of shape (n_samples,).
 
         Returns:
-            tuple[DataLoader, DataLoader]: Training and validation data
-                loaders.
+            DataLoader: Shuffled DataLoader for training.
         """
         X_t = torch.from_numpy(X).to(torch.float32)
         y_t = torch.from_numpy(y).to(torch.float32)
 
-        dataset = TensorDataset(X_t, y_t)
-
-        train_size = int(0.8 * len(dataset))
-        val_size = len(dataset) - train_size
-        
-        train_dataset, val_dataset = random_split(
-            dataset,
-            [train_size, val_size]
-        )
-
-        train_loader = DataLoader(
-            train_dataset,
+        return DataLoader(
+            TensorDataset(X_t, y_t),
             batch_size=self.batch_size,
             shuffle=True
         )
-
-        val_loader = DataLoader(
-            val_dataset,
-            batch_size=self.batch_size,
-            shuffle=False
-        )
-
-        return train_loader, val_loader
