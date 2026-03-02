@@ -209,3 +209,4 @@ __marimo__/
 # CSV data and joblib model files
 *.CSV
 *.joblib
+*.json

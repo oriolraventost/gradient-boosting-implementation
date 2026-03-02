@@ -1,12 +1,10 @@
 import numpy as np
-import pandas as pd
 import logging
-import copy
 import torch
 import torch.nn as nn
 import torch.optim as optim
 
-from torch.utils.data import DataLoader, TensorDataset, random_split
+from torch.utils.data import DataLoader, TensorDataset
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(
@@ -38,11 +36,11 @@ class NNRegressor(nn.Module):
         """Initializes the neural network regressor."""
         super().__init__()
         
-        self.epochs = epochs
-        self.learning_rate = learning_rate
-        self.max_norm = max_norm
-        self.hidden_size = hidden_size
-        self.batch_size = batch_size
+        self.epochs: int = epochs
+        self.learning_rate: float = learning_rate
+        self.max_norm: float = max_norm
+        self.hidden_size: int = hidden_size
+        self.batch_size: int = batch_size
         
         self.network: nn.Sequential | None = None
 
@@ -72,16 +70,14 @@ class NNRegressor(nn.Module):
             X (np.ndarray): Features.
             y (np.ndarray): Labels.
         """
-        torch.manual_seed(42)
-
         input_size = X.shape[1]
         output_size = y.shape[1] if len(y.shape) > 1 else 1
 
         self._get_network(input_size, output_size)
 
         loader = self._prepare_loader(X, y)
+        
         criterion = nn.MSELoss()
-
         optimizer = optim.Adam(self.parameters(), lr=self.learning_rate)
         
         scheduler = optim.lr_scheduler.OneCycleLR(
@@ -107,7 +103,7 @@ class NNRegressor(nn.Module):
                 loss = criterion(preds, batch_y.view_as(preds))
                 loss.backward()
 
-                torch.nn.utils.clip_grad_norm_(
+                nn.utils.clip_grad_norm_(
                     self.parameters(),
                     max_norm=self.max_norm
                 )
@@ -151,7 +147,7 @@ class NNRegressor(nn.Module):
             input_size (int): The number of input features.
             output_size (int): The dimension of the target.
         """
-        self.network: nn.Sequential = nn.Sequential(
+        self.network = nn.Sequential(
             nn.Linear(input_size, self.hidden_size),
             nn.GELU(),
 
