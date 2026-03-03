@@ -24,24 +24,23 @@ def main():
 
     data_loader = DataLoader(
             active_dataset,
-            active_dataset_config["id_column"],
-            active_dataset_config["target"]
+            **active_dataset_config
         )
 
     if config["main"]["run_preprocess"]:
-        raw_train, raw_test = data_loader.load_raw_data()
+        raw_train, raw_valid, raw_test = data_loader.load_raw_data()
 
         processor = Processor(
-            active_dataset_config["target"],
+            active_dataset_config["target_column"],
             active_dataset_config["id_column"]
         )
 
-        train, test = processor.run(raw_train, raw_test)
+        train, valid, test = processor.run(raw_train, raw_valid, raw_test)
 
-        data_loader.save_processed_data(train, test)
+        data_loader.save_processed_data(train, valid, test)
     
     if config["main"]["train_and_predict"]:
-        train, test = data_loader.load_processed_data()
+        train, valid, test = data_loader.load_processed_data()
     
         if active_dataset_config["problem_type"] == "regression":
             model = GBRegressor(
@@ -55,11 +54,14 @@ def main():
                 weak_learner_config=weak_learner_config
             )
 
-        X_train, X_valid, y_train, y_valid = train_test_split(
-            train.drop(columns=[active_dataset_config["target"]]), 
-            train[active_dataset_config["target"]],
-            test_size=0.2,
-            random_state=42
+        X_train, y_train = (
+            train.drop(columns=[active_dataset_config["target_column"]]), 
+            train[active_dataset_config["target_column"]]
+        )
+
+        X_valid, y_valid = (
+            valid.drop(columns=[active_dataset_config["target_column"]]), 
+            valid[active_dataset_config["target_column"]]
         )
         
         start_time = datetime.now()

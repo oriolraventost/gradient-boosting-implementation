@@ -2,6 +2,7 @@ import pandas as pd
 import json
 
 from pathlib import Path
+from sklearn.model_selection import train_test_split
 
 from src import *
 from src.gb_regressor import GBRegressor
@@ -19,100 +20,128 @@ class DataLoader:
         model_dir (Path): Directory where trained models are saved.
         id_column (str): The column name used as the identifier.
         target (str): The column name for the target variable.
+        problem_type (str): Regression or classification.
     """
 
-    def __init__(self, dataset_name: str, id_column: str, target: str):
-        """Initializes the DataLoader with project-specific paths.
-
-        Args:
-            dataset_name: The folder name for the specific dataset.
-            id: The name of the ID column to be used as the DataFrame index.
-        """
+    def __init__(
+        self,
+        dataset_name: str,
+        id_column: str,
+        target_column: str,
+        problem_type: str
+    ):
+        """Initializes the DataLoader with project-specific paths."""
         self.raw_dir = Path(DATA_PATH) / f"{dataset_name}/raw"
+        
         self.processed_dir = Path(DATA_PATH) / f"{dataset_name}/processed"
         self.processed_dir.mkdir(parents=True, exist_ok=True)
+        
         self.model_dir = Path(MODELS_PATH) / f"{dataset_name}"
         self.model_dir.mkdir(parents=True, exist_ok=True)
+        
         self.id_column = id_column
-        self.target = target
+        self.target_column = target_column
+        self.problem_type = problem_type
     
-    def load_raw_data(self) -> tuple[pd.DataFrame, pd.DataFrame]:
+    def load_raw_data(
+        self
+    ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
         """Loads raw data by detecting either combined or split
         feature/label files.
 
-        It first checks for 'train.csv'. If not found, it attempts to merge 
-        'train_features.csv' and 'train_labels.csv' on the ID index.
-
         Returns:
-            A tuple containing (train_df, test_df).
-
-        Raises:
-            FileNotFoundError: If neither the combined nor the split files
-                exist.
+            A tuple containing training, validation and test datasets.
         """
         train_path = self.raw_dir / "train.csv"
         test_path = self.raw_dir / "test.csv"
 
-        if train_path.exists() and test_path.exists():
-            train = pd.read_csv(train_path, index_col=self.id_column)
-            test = pd.read_csv(test_path, index_col=self.id_column)
-            return train, test
-        
         train_features_path = self.raw_dir / "train_features.csv"
         train_labels_path = self.raw_dir / "train_labels.csv"
         test_features_path = self.raw_dir / "test_features.csv"
 
-        if not (train_features_path.exists() and train_labels_path.exists()):
+        if train_path.exists() and test_path.exists():
+            full_train = pd.read_csv(train_path, index_col=self.id_column)
+            test = pd.read_csv(test_path, index_col=self.id_column)
+        
+        elif (train_features_path.exists() and
+            train_labels_path.exists() and
+            test_features_path.exists()):
+
+            train_features = pd.read_csv(
+                train_features_path,
+                index_col=self.id_column
+            )
+
+            train_labels = pd.read_csv(
+                train_labels_path,
+                index_col=self.id_column
+            )
+            
+            test = pd.read_csv(
+                test_features_path,
+                index_col=self.id_column
+            )
+
+            full_train = pd.merge(
+                train_features,
+                train_labels,
+                left_index=True,
+                right_index=True
+            )
+
+        else:
             raise FileNotFoundError(
                 "Missing raw data files in the expected directory."
             )
 
-        train_features = pd.read_csv(
-            train_features_path,
-            index_col=self.id_column
+        stratify_col = (
+            full_train[self.target_column]
+            if self.problem_type == "classification"
+            else None
         )
 
-        train_labels = pd.read_csv(
-            train_labels_path,
-            index_col=self.id_column
+        train, valid = train_test_split(
+            full_train,
+            test_size=0.2,
+            stratify=stratify_col,
+            random_state=42
         )
         
-        test_features = pd.read_csv(
-            test_features_path,
-            index_col=self.id_column
-        )
-
-        train = pd.merge(
-            train_features,
-            train_labels,
-            left_index=True,
-            right_index=True
-        )
-        
-        return train, test_features
+        return train, valid, test
     
     def save_processed_data(
         self,
         train: pd.DataFrame,
+        valid: pd.DataFrame,
         test: pd.DataFrame
     ) -> None:
         """Persists processed DataFrames to the disk.
 
         Args:
-            train: The cleaned training DataFrame.
-            test: The cleaned test DataFrame.
+            train (pd.DataFrame): The cleaned training DataFrame.
+            valid (pd.DataFrame): The cleaned validation DataFrame.
+            test (pd.DataFrame): The cleaned test DataFrame.
         """
         train.to_csv(self.processed_dir / "train.csv")
+        valid.to_csv(self.processed_dir / "valid.csv")
         test.to_csv(self.processed_dir / "test.csv")
 
-    def load_processed_data(self) -> tuple[pd.DataFrame, pd.DataFrame]:
+    def load_processed_data(
+        self
+    ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
         """Loads previously saved processed data.
 
         Returns:
-            A tuple containing the processed (train_df, test_df).
+            A tuple containing processed training, validation and
+                test datasets.
         """
         train = pd.read_csv(
             self.processed_dir / "train.csv",
+            index_col=self.id_column
+        )
+
+        valid = pd.read_csv(
+            self.processed_dir / "valid.csv",
             index_col=self.id_column
         )
 
@@ -121,7 +150,7 @@ class DataLoader:
             index_col=self.id_column
         )
 
-        return train, test
+        return train, valid, test
     
     def save_model(
         self,
@@ -186,7 +215,7 @@ class DataLoader:
     
         output = pd.DataFrame({
             self.id_column: test_data.index,
-            self.target: preds
+            self.target_column: preds
         })
 
         output.to_csv(str(model_path / "test_preds.csv"), index=False)
