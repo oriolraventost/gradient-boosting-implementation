@@ -22,17 +22,15 @@ class DataLoader:
     """
 
     def __init__(self, dataset_name: str, id_column: str, target: str):
-        """Initializes the DataLoader with project-specific paths.
-
-        Args:
-            dataset_name: The folder name for the specific dataset.
-            id: The name of the ID column to be used as the DataFrame index.
-        """
+        """Initializes the DataLoader with project-specific paths."""
         self.raw_dir = Path(DATA_PATH) / f"{dataset_name}/raw"
+
         self.processed_dir = Path(DATA_PATH) / f"{dataset_name}/processed"
         self.processed_dir.mkdir(parents=True, exist_ok=True)
+        
         self.model_dir = Path(MODELS_PATH) / f"{dataset_name}"
         self.model_dir.mkdir(parents=True, exist_ok=True)
+        
         self.id_column = id_column
         self.target = target
     
@@ -40,15 +38,8 @@ class DataLoader:
         """Loads raw data by detecting either combined or split
         feature/label files.
 
-        It first checks for 'train.csv'. If not found, it attempts to merge 
-        'train_features.csv' and 'train_labels.csv' on the ID index.
-
         Returns:
-            A tuple containing (train_df, test_df).
-
-        Raises:
-            FileNotFoundError: If neither the combined nor the split files
-                exist.
+            tuple[pd.DataFrame, pd.DataFrame]: Raw training and test data.
         """
         train_path = self.raw_dir / "train.csv"
         test_path = self.raw_dir / "test.csv"
@@ -99,8 +90,8 @@ class DataLoader:
         """Persists processed DataFrames to the disk.
 
         Args:
-            train: The cleaned training DataFrame.
-            test: The cleaned test DataFrame.
+            train (pd.DataFrame): The cleaned training data.
+            test (pd.DataFrame): The cleaned test data.
         """
         train.to_csv(self.processed_dir / "train.csv")
         test.to_csv(self.processed_dir / "test.csv")
@@ -109,7 +100,8 @@ class DataLoader:
         """Loads previously saved processed data.
 
         Returns:
-            A tuple containing the processed (train_df, test_df).
+            tuple[pd.DataFrame, pd.DataFrame]: Processed training and test
+                data.
         """
         train = pd.read_csv(
             self.processed_dir / "train.csv",
@@ -130,7 +122,8 @@ class DataLoader:
         start_timestamp: str,
         end_timestamp: str,
         gradient_boosting_config: dict,
-        weak_learner_config: dict
+        weak_learner_config: dict,
+        prediction_mode: str | None,
     ) -> None:
         """Serializes the model and exports all associated run artifacts.
 
@@ -149,10 +142,11 @@ class DataLoader:
             gradient_boosting_config (dict): Hyperparameters for the boosting
                 algorithm.
             weak_learner_config (dict): Hyperparameters for the weak learners.
+            prediction_mode (str): Whether to predict classes or
+                probabilities, available only for classification tasks.
         """
         model_path = self.model_dir / f"{end_timestamp}"
         model_path.mkdir(parents=True, exist_ok=True)
-
 
         model.save_model(str(model_path / "model.joblib"))
 
@@ -182,11 +176,25 @@ class DataLoader:
         with open(str(model_path / "info.json"), 'w', encoding='utf-8') as file:
             json.dump(info, file, indent=4)
 
-        preds = model.predict(test_data)
-    
-        output = pd.DataFrame({
-            self.id_column: test_data.index,
-            self.target: preds
-        })
+        if prediction_mode and prediction_mode == "probability":
+            preds = model.predict_proba(test_data)
+            class_labels = model.label_encoder.classes_
+            
+            output_dict = {
+                f"{self.target}_{label}": preds[:, i] 
+                for i, label in enumerate(class_labels)
+            }
+            
+            output = pd.DataFrame({
+                self.id_column: test_data.index,
+                **output_dict
+            })
+        
+        else:
+            preds = model.predict(test_data)
+            output = pd.DataFrame({
+                self.id_column: test_data.index,
+                self.target: preds
+            })
 
         output.to_csv(str(model_path / "test_preds.csv"), index=False)

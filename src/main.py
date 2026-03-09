@@ -31,11 +31,7 @@ def main():
     if config["main"]["run_preprocess"]:
         raw_train, raw_test = data_loader.load_raw_data()
 
-        processor = Processor(
-            active_dataset_config["target"],
-            active_dataset_config["id_column"]
-        )
-
+        processor = Processor(**active_dataset_config)
         train, test = processor.run(raw_train, raw_test)
 
         data_loader.save_processed_data(train, test)
@@ -48,6 +44,9 @@ def main():
                 **config["gradient_boosting"],
                 weak_learner_config=weak_learner_config
             )
+            
+            stratify_col = None
+            prediction_mode = None
 
         else:       
             model = GBClassifier(
@@ -55,9 +54,13 @@ def main():
                 weak_learner_config=weak_learner_config
             )
 
+            prediction_mode = config["main"]["prediction_mode"]
+            stratify_col = train[active_dataset_config["target"]]
+
         X_train, X_valid, y_train, y_valid = train_test_split(
             train.drop(columns=[active_dataset_config["target"]]), 
             train[active_dataset_config["target"]],
+            stratify=stratify_col,
             test_size=0.2,
             random_state=42
         )
@@ -69,14 +72,15 @@ def main():
             
         end_time = datetime.now()
         end_timestamp = end_time.strftime("%Y_%m_%d_%H_%M")
-        
+
         data_loader.save_model(
             model,
             test,
             start_timestamp,
             end_timestamp,
             config["gradient_boosting"],
-            weak_learner_config
+            weak_learner_config,
+            prediction_mode
         )
 
 if __name__=="__main__":

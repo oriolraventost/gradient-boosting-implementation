@@ -125,20 +125,25 @@ class GBRegressor:
         valid_preds = np.full(len(y_valid), self.initial_constant)
 
         for iter in range(1, self.n_estimators + 1):            
+            pseudo_residuals = self._compute_pseudo_residuals(
+                y_train,
+                train_preds
+            )
+
             subsample_idx, colsample_bytree_idx = self._draw_subsample(
                 n_rows_train,
                 n_cols_train
             )
             
-            pseudo_residuals = self._compute_pseudo_residuals(
-                y_train[subsample_idx],
-                train_preds[subsample_idx]
-            )
-            
             weak_learner = self._fit_weak_learner(
                 X_train[subsample_idx][:, colsample_bytree_idx],
-                pseudo_residuals
+                pseudo_residuals[subsample_idx]
             )
+
+            oob_idx = np.setdiff1d(np.arange(n_rows_train), subsample_idx)
+            oob_preds = weak_learner.predict(X_train[oob_idx][:, colsample_bytree_idx])
+            oob_mse = np.mean((pseudo_residuals[oob_idx] - oob_preds) ** 2)
+            logger.info(f"OOB MSE: {oob_mse:.6f}")
             
             train_update = self.learning_rate * weak_learner.predict(
                 X_train[:, colsample_bytree_idx]

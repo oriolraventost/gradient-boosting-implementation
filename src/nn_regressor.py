@@ -16,9 +16,6 @@ class NNRegressor(nn.Module):
     """A PyTorch neural network regressor for tabular data.
 
     Attributes:
-        epochs (int): Number of iterations on the full training data.
-        learning_rate (float): Learning rate for the gradient descent updates.
-        max_norm (float): Maximum gradient norm for clipping
         hidden_size (int): Number of units in each hidden layer.
         batch_size (int): Batch size for parallel processing.
         network (nn.Sequential): The core deep learning layers.
@@ -27,18 +24,12 @@ class NNRegressor(nn.Module):
 
     def __init__(
         self,
-        epochs: int,
-        learning_rate: float,
-        max_norm: float,
         hidden_size: int,
         batch_size: int
     ):
         """Initializes the neural network regressor."""
         super().__init__()
         
-        self.epochs: int = epochs
-        self.learning_rate: float = learning_rate
-        self.max_norm: float = max_norm
         self.hidden_size: int = hidden_size
         self.batch_size: int = batch_size
         
@@ -78,46 +69,20 @@ class NNRegressor(nn.Module):
         loader = self._prepare_loader(X, y)
         
         criterion = nn.MSELoss()
-        optimizer = optim.Adam(self.parameters(), lr=self.learning_rate)
-        
-        scheduler = optim.lr_scheduler.OneCycleLR(
-            optimizer, 
-            max_lr=self.learning_rate, 
-            steps_per_epoch=len(loader), 
-            epochs=self.epochs
-        )
-        
-        logger.info(
-            f"Starting training for {self.epochs} epochs on {self.device}."
-        )
+        optimizer = optim.Adam(self.parameters())
 
-        for epoch in range(1, self.epochs + 1):
-            self.train()
-            train_loss = 0.0
-            for batch_X, batch_y in loader:
-                batch_X = batch_X.to(self.device)
-                batch_y = batch_y.to(self.device)
-                
-                optimizer.zero_grad()
-                preds = self(batch_X)
-                loss = criterion(preds, batch_y.view_as(preds))
-                loss.backward()
+        self.train()
+        for batch_X, batch_y in loader:
+            batch_X = batch_X.to(self.device)
+            batch_y = batch_y.to(self.device)
 
-                nn.utils.clip_grad_norm_(
-                    self.parameters(),
-                    max_norm=self.max_norm
-                )
-                
-                optimizer.step()
-                scheduler.step()
-                train_loss += loss.item()
-
-            current_lr = optimizer.param_groups[0]['lr']
-            avg_train_loss = train_loss / len(loader)
-            logger.info(
-                f"Epoch {epoch} | Loss: {avg_train_loss:.4f} | "
-                f"LR: {current_lr:.4f}"
-            )
+            optimizer.zero_grad()
+            
+            preds = self(batch_X)
+            loss = criterion(preds, batch_y.view_as(preds))
+            
+            loss.backward()
+            optimizer.step()
 
     def predict(self, X: np.ndarray) -> np.ndarray:
         """Generates regression predictions for the given input data.
@@ -149,9 +114,6 @@ class NNRegressor(nn.Module):
         """
         self.network = nn.Sequential(
             nn.Linear(input_size, self.hidden_size),
-            nn.GELU(),
-
-            nn.Linear(self.hidden_size, self.hidden_size),
             nn.GELU(),
 
             nn.Linear(self.hidden_size, output_size)

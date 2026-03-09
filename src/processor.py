@@ -1,6 +1,7 @@
 import logging
 import pandas as pd
 
+from sklearn.model_selection import train_test_split
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
 from sklearn.impute import SimpleImputer
@@ -25,15 +26,17 @@ class Processor:
     Attributes:
         target (str): Name of target column.
         id_column (str): Name of ID column.
-        cat_cols(list[str] | None): List of categorical feature names.
-        num_cols(list[str] | None): List of numerical feature names.
-        transformer(ColumnTransformer | None): The Scikit-Learn pipeline.
+        problem_type (str): Learning task (regression or classification).
+        cat_cols (list[str] | None): List of categorical feature names.
+        num_cols (list[str] | None): List of numerical feature names.
+        transformer (ColumnTransformer | None): The Scikit-Learn pipeline.
     """
 
-    def __init__(self, target: str, id_column: str):
+    def __init__(self, target: str, id_column: str, problem_type: str):
         """Initializes the processor."""
-        self.target = target
-        self.id_column = id_column
+        self.target: str = target
+        self.id_column: str = id_column
+        self.problem_type: str = problem_type
         self.cat_cols: list[str] | None = None
         self.num_cols: list[str] | None = None
         self.transformer: ColumnTransformer | None = None
@@ -52,7 +55,6 @@ class Processor:
         Args:
             train_data (pd.DataFrame): The raw training dataset.
             test_data (pd.DataFrame): The raw testing dataset.
-            target (str): The column name of the dependent variable.
 
         Returns:
             tuple[pd.DataFrame, pd.DataFrame]: A tuple containing the
@@ -63,10 +65,9 @@ class Processor:
         self._get_cat_cols(train_data)
         self._get_num_cols(train_data)
 
-        train_data[self.cat_cols] = train_data[self.cat_cols].astype(str)
-        test_data[self.cat_cols] = test_data[self.cat_cols].astype(str)
-
         self._get_transformer()
+
+        train_data = self._cut_data(train_data)
         
         logger.info("Fitting and transforming training data...")
         processed_train_data = self.transformer.fit_transform(
@@ -79,24 +80,10 @@ class Processor:
         processed_test_data = self.transformer.transform(test_data)
         processed_test_data.index = test_data.index
 
-        constant_cols = [
-            col for col in processed_train_data.columns 
-            if processed_train_data[col].nunique() <= 1
-        ]
-        
-        if constant_cols:
-            logger.info(
-                f"Removing constant columns: {", ".join(constant_cols)}"
-            )
-            
-            processed_train_data.drop(
-                columns=constant_cols,
-                inplace=True
-            )
-            processed_test_data.drop(
-                columns=constant_cols,
-                inplace=True
-            )
+        self._drop_duplicate_and_constant(
+            processed_train_data,
+            processed_test_data
+        )
 
         return processed_train_data, processed_test_data
 
@@ -132,7 +119,6 @@ class Processor:
                 f"Numerical columns detected: {', '.join(self.num_cols)}"
             )
 
-
     def _get_transformer(self) -> None:
         """Initialize the feature engineering pipeline for numeric and
         categorical attributes.
@@ -166,3 +152,83 @@ class Processor:
             ],
             verbose_feature_names_out=False
         ).set_output(transform="pandas")
+    
+    def _cut_data(
+        self,
+        data: pd.DataFrame,
+        max_rows: int = 100_000,
+        iqr_factor: float = 1.5
+    ) -> pd.DataFrame:
+        """Reduces the dataset size. If the dataset exceeds the limit,
+        it performs a stratified reduction for classification problems
+        to maintain class proportions. For regression, it performs a
+        simple random shuffle and cut, after removing mild target outliers.
+
+        Args:
+            data (pd.DataFrame): The input dataframe to be processed.
+            max_rows (int): Maximum number of rows of reduced data.
+            iqr_factor (float): Outlier removal IQR factor.
+
+        Returns:
+            pd.DataFrame: A subset of the input data.
+        """
+        if self.problem_type == "regression":
+            q1 = data[self.target].quantile(0.25)
+            q3 = data[self.target].quantile(0.75)
+            iqr = q3 - q1
+            lower = q1 - iqr_factor * iqr
+            upper = q3 + iqr_factor * iqr
+            data = data[(data[self.target] >= lower) & (data[self.target] <= upper)]
+
+        if len(data) <= max_rows:
+            return data
+        
+        stratify_col = (
+            data[self.target]
+            if self.problem_type == "classification"
+            else None
+        )
+
+        _, data_subset = train_test_split(
+            data,
+            test_size=max_rows,
+            stratify=stratify_col,
+            random_state=42
+        )
+        
+        return data_subset
+
+    def _drop_duplicate_and_constant(
+        self,
+        train: pd.DataFrame,
+        test: pd.DataFrame
+    ) -> None:
+        """Removes non-informative columns and training duplicates
+        to prevent bias.
+
+        Identifies constant columns based on the training set and removes
+        them from all splits. Drops duplicate rows from the training set
+        only to ensure the model doesn't overfit to repeated observations.
+
+        Args:
+            train (pd.DataFrame): Training feature set.
+            test (pd.DataFrame): Test feature set.
+        """
+        constant_cols = [
+            col for col in train.columns 
+            if train[col].nunique(dropna=False) <= 1
+        ]
+
+        if constant_cols:
+            logger.info(f"Removing {len(constant_cols)} constant columns.")
+            train.drop(columns=constant_cols, inplace=True)
+            test.drop(columns=constant_cols, inplace=True)
+
+        initial_rows = len(train)
+        train.drop_duplicates(inplace=True)
+        dropped_rows = initial_rows - len(train)
+        
+        if dropped_rows > 0:
+            logger.info(
+                f"Dropped {dropped_rows} duplicate rows from training set."
+            )
