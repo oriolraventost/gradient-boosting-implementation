@@ -32,13 +32,20 @@ class Processor:
         transformer (ColumnTransformer | None): The Scikit-Learn pipeline.
     """
 
-    def __init__(self, target: str, id_column: str, problem_type: str):
+    def __init__(
+        self,
+        id_column: str,
+        target: str,
+        cat_cols: list[str],
+        num_cols: list[str],
+        problem_type: str
+    ):
         """Initializes the processor."""
         self.target: str = target
         self.id_column: str = id_column
         self.problem_type: str = problem_type
-        self.cat_cols: list[str] | None = None
-        self.num_cols: list[str] | None = None
+        self.cat_cols: list[str] = cat_cols
+        self.num_cols: list[str] = num_cols
         self.transformer: ColumnTransformer | None = None
     
     def run(
@@ -61,9 +68,6 @@ class Processor:
                 processed training and testing DataFrames.
         """
         logger.info("Processing pipeline starting...")
-        
-        self._get_cat_cols(train_data)
-        self._get_num_cols(train_data)
 
         self._get_transformer()
 
@@ -87,38 +91,6 @@ class Processor:
 
         return processed_train_data, processed_test_data
 
-    def _get_cat_cols(self, data: pd.DataFrame) -> None:
-        """Identifies categorical columns based on object and boolean types.
-        
-        Args:
-            data (pd.DataFrame): The input dataframe to scan.
-        """
-        self.cat_cols = [
-            col for col in data.select_dtypes(include=["object", "bool"])
-            if col not in [self.id_column, self.target]
-        ]
-        
-        if self.cat_cols:
-            logger.info(
-                f"Categorical columns detected: {', '.join(self.cat_cols)}"
-            )
-
-    def _get_num_cols(self, data: pd.DataFrame) -> None:
-        """Identifies numerical columns by excluding objects and booleans.
-        
-        Args:
-            data (pd.DataFrame): The input dataframe to scan.
-        """
-        self.num_cols = [
-            col for col in data.select_dtypes(exclude=["object", "bool"])
-            if col not in [self.id_column, self.target]
-        ]
-        
-        if self.num_cols:
-            logger.info(
-                f"Numerical columns detected: {', '.join(self.num_cols)}"
-            )
-
     def _get_transformer(self) -> None:
         """Initialize the feature engineering pipeline for numeric and
         categorical attributes.
@@ -134,6 +106,7 @@ class Processor:
         """
         cat_pipeline = Pipeline([
             ('encode', OneHotEncoder(
+                drop="if_binary",
                 min_frequency=0.01,
                 handle_unknown='ignore',
                 sparse_output=False
