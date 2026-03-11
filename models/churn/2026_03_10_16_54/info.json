@@ -1,0 +1,23 @@
+{
+    "run_metadata": {
+        "problem_type": "classification",
+        "best_iter": 743,
+        "best_ce": 0.308791,
+        "best_accuracy": 0.8543,
+        "start_timestamp": "2026_03_10_15_47",
+        "end_timestamp": "2026_03_10_16_54"
+    },
+    "gradient_boosting_config": {
+        "weak_learner_key": "neural_network",
+        "n_estimators": 2000,
+        "learning_rate": 0.1,
+        "subsample": 0.8,
+        "colsample_bytree": 0.8,
+        "reg_lambda": 1.0,
+        "early_stopping_rounds": 10
+    },
+    "weak_learner_config": {
+        "hidden_size": 16,
+        "batch_size": 16
+    }
+}
