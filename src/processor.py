@@ -7,7 +7,7 @@ from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
 from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import (
-    LabelEncoder,
+    OrdinalEncoder,
     OneHotEncoder,
     RobustScaler
 )
@@ -54,42 +54,49 @@ class Processor:
         self.num_cols: list[str] = num_cols
         
         self.feature_transformer: ColumnTransformer | None = None
-        self.target_transformer: RobustScaler | LabelEncoder | None = None
+        self.target_transformer: RobustScaler | OrdinalEncoder | None = None
     
-    def run(
+    def transform_features(
         self,
-        train_data: pd.DataFrame,
+        full_train_data: pd.DataFrame,
         test_data: pd.DataFrame
-    ) -> tuple[pd.DataFrame, pd.DataFrame]:
-        """Orchestrates fitting (on train only) and transforming both sets.
+    ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+        """Orchestrates fitting and transforming both sets.
         
         This method follows the "no data leakage" principle by fitting the 
         transformer strictly on the training data and only transforming the
-        test data.
+        validation and test data.
 
         Args:
-            train_data (pd.DataFrame): The raw training dataset.
+            full_train_data (pd.DataFrame): The raw full training dataset.
             test_data (pd.DataFrame): The raw testing dataset.
 
         Returns:
-            tuple[pd.DataFrame, pd.DataFrame]: A tuple containing the
-                processed training and testing DataFrames.
+            tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]: A tuple
+                containing the processed training, validation and
+                testing DataFrames.
         """
         logger.info("Processing pipeline starting...")
 
         self._get_feature_transformer()
-        self._get_target_transformer()
+        
+        full_train_data = self._cut_data(full_train_data)
 
-        train_data = self._cut_data(train_data)
+        train_data, valid_data = self._train_valid_split(
+            full_train_data
+        )
         
         logger.info("Fitting and transforming training data...")
         processed_train_data = self.feature_transformer.fit_transform(
             train_data
         )
         processed_train_data.index = train_data.index
-        processed_train_data[self.target] = (
-            self.target_transformer.fit_transform(train_data[self.target])
-        )
+        processed_train_data[self.target] = train_data[self.target]
+
+        logger.info("Transforming validation data...")
+        processed_valid_data = self.feature_transformer.transform(valid_data)
+        processed_valid_data.index = valid_data.index
+        processed_valid_data[self.target] = valid_data[self.target]
 
         logger.info("Transforming test data...")
         processed_test_data = self.feature_transformer.transform(test_data)
@@ -97,57 +104,57 @@ class Processor:
 
         self._drop_duplicate_and_constant(
             processed_train_data,
+            processed_valid_data,
             processed_test_data
         )
 
-        return processed_train_data, processed_test_data
-    
-    def train_valid_split(
+        return processed_train_data, processed_valid_data, processed_test_data
+
+    def transform_target(
         self,
-        data: pd.DataFrame
-    ) -> tuple[pd.DataFrame, pd.DataFrame]:
+        y_train: pd.Series,
+        y_valid: pd.Series
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """ Fits the target transformer and transforms training and
+        validation targets.
 
-        stratify_col = (
-            data[self.target] if self.problem_type == "classification"
-            else None
-        )
-
-        return train_test_split(
-            data.drop(columns=[self.target]), 
-            data[self.target],
-            stratify=stratify_col,
-            test_size=0.2,
-            random_state=42
-        )
-
-    def _inverse_transform_target(self, data: np.ndarray) -> np.ndarray:
-        """Reverts the target variable to its original scale or labels.
-
-        Applies the inverse transformation using the previously fitted 
-        target transformer.
+        Selects RobustScaler for regression or OrdinalEncoder for
+        classification. Handles the necessary 2D reshaping for the
+        transformers and flattens the output back to 1D arrays.
 
         Args:
-            data (np.ndarray): A numpy array containing the transformed target
-                values or model predictions.
+            y_train (pd.Series): Training target values.
+            y_valid (pd.Series): Validation target values.
 
         Returns:
-            np.ndarray: The target data mapped back to its original 
-                distribution or categorical labels.
+            tuple[np.ndarray, np.ndarray]: A tuple containing the
+                transformed arrays.
         """
-        return self.target_transformer.inverse_transform(data)
+        if self.problem_type == "regression":
+            self.target_transformer = RobustScaler()
+        
+        else:
+            self.target_transformer = OrdinalEncoder()
+        
+        processed_y_train = self.target_transformer.fit_transform(
+            y_train.values.reshape(-1, 1)
+        ).ravel()
+        
+        processed_y_valid = self.target_transformer.transform(
+            y_valid.values.reshape(-1, 1)
+        ).ravel()
 
-    def _get_feature_transformer(self) -> None:
+        return processed_y_train, processed_y_valid
+
+    def _get_feature_transformer(self):
         """Initialize the feature engineering pipeline for numeric and
         categorical attributes.
 
-        The transformation logic follows a two-pronged strategy:
-        - Numerical: Imputes missing values using the median and applies 
-          robust scaling.
-        - Categorical: Performs One-Hot Encoding restricted to categories
-          with frequency higher than 1%.
-
-        Sets the transformer to output pandas DataFrames to maintain 
-        feature name transparency throughout the pipeline.
+        The transformation logic follows a two-pronged strategy. On
+        numerical features, imputes missing values using the median
+        and applies robust scaling. On categorical features, performs
+        One-Hot Encoding restricted to categories with frequency higher
+        than 1%.
         """
         cat_pipeline = Pipeline([
             ('encode', OneHotEncoder(
@@ -170,23 +177,6 @@ class Processor:
             ],
             verbose_feature_names_out=False
         ).set_output(transform="pandas")
-    
-    def _get_target_transformer(self) -> RobustScaler | LabelEncoder:
-        """Initializes the appropriate target transformer based on
-        the problem type.
-
-        Selects a scaler for continuous target variables or an
-        encoder for categorical labels in classification tasks.
-
-        Returns:
-            RobustScaler | LabelEncoder: A Scikit-Learn object for
-                trasforming the target variable.
-        """
-        if self.problem_type == "regression":
-            return RobustScaler()
-        
-        else:
-            return LabelEncoder()
     
     def _cut_data(
         self,
@@ -233,9 +223,40 @@ class Processor:
         
         return data_subset
 
+    def _train_valid_split(
+        self,
+        data: pd.DataFrame
+    ) -> tuple[pd.DataFrame, pd.DataFrame]:
+        """Splits the dataset into training and validation sets.
+
+        Performs a stratified split if the problem type is classification to
+        ensure class proportions are maintained across folds. Otherwise, 
+        performs a standard split.
+
+        Args:
+            data (pd.DataFrame): The complete processed dataset containing 
+                both features and the target column.
+
+        Returns:
+            tuple[pd.DataFrame, pd.DataFrame]: A tuple containing the 
+                split at a 80/20 ratio.
+        """
+        stratify_col = (
+            data[self.target] if self.problem_type == "classification"
+            else None
+        )
+
+        return train_test_split(
+            data, 
+            stratify=stratify_col,
+            test_size=0.2,
+            random_state=42
+        )
+
     def _drop_duplicate_and_constant(
         self,
         train: pd.DataFrame,
+        valid: pd.DataFrame,
         test: pd.DataFrame
     ) -> None:
         """Removes non-informative columns and training duplicates
@@ -246,8 +267,9 @@ class Processor:
         only to ensure the model doesn't overfit to repeated observations.
 
         Args:
-            train (pd.DataFrame): Training feature set.
-            test (pd.DataFrame): Test feature set.
+            train (pd.DataFrame): Training data.
+            valid (pd.DataFrame): Validation data.
+            test (pd.DataFrame): Test data.
         """
         constant_cols = [
             col for col in train.columns 
@@ -257,6 +279,7 @@ class Processor:
         if constant_cols:
             logger.info(f"Removing {len(constant_cols)} constant columns.")
             train.drop(columns=constant_cols, inplace=True)
+            valid.drop(columns=constant_cols, inplace=True)
             test.drop(columns=constant_cols, inplace=True)
 
         initial_rows = len(train)

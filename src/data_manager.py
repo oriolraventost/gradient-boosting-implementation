@@ -4,7 +4,7 @@ import json
 import yaml
 
 from pathlib import Path
-from sklearn.preprocessing import RobustScaler, LabelEncoder
+from sklearn.preprocessing import RobustScaler, OrdinalEncoder
 
 from src import *
 from src.gb_regressor import GBRegressor
@@ -32,11 +32,12 @@ class DataManager:
         self.target: str | None = None
         self.problem_type: str | None = None
 
-    def load_config(self) -> dict:
+    def load_config(self) -> tuple[dict, dict]:
         """Loads the configuration from a YAML file.
 
         Returns:
-            dict: A dictionary containing the configuration settings.
+            tuple[dict, dict]: Two dictionaries containing datasets and
+                modeling configuration settings.
         """
         with open(DATASETS_CONFIG_PATH, "r") as f:
             datasets_config = yaml.safe_load(f)
@@ -56,6 +57,7 @@ class DataManager:
         
         self.id_column = datasets_config[active_dataset]["id_column"]
         self.target = datasets_config[active_dataset]["target"]
+        self.problem_type = datasets_config[active_dataset]["problem_type"]
 
         return datasets_config, modeling_config
     
@@ -76,26 +78,36 @@ class DataManager:
     def save_processed_data(
         self,
         train: pd.DataFrame,
+        valid: pd.DataFrame,
         test: pd.DataFrame
     ) -> None:
         """Persists processed DataFrames to the disk.
 
         Args:
             train (pd.DataFrame): The cleaned training data.
+            valid (pd.DataFrame): The cleaned validation data.
             test (pd.DataFrame): The cleaned test data.
         """
         train.to_csv(self.processed_dir / "train.csv")
+        valid.to_csv(self.processed_dir / "valid.csv")
         test.to_csv(self.processed_dir / "test.csv")
 
-    def load_processed_data(self) -> tuple[pd.DataFrame, pd.DataFrame]:
+    def load_processed_data(
+        self
+    ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
         """Loads previously saved processed data.
 
         Returns:
-            tuple[pd.DataFrame, pd.DataFrame]: Processed training and test
-                data.
+            tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]: Processed
+                training, validation and test data.
         """
         train = pd.read_csv(
             self.processed_dir / "train.csv",
+            index_col=self.id_column
+        )
+
+        valid = pd.read_csv(
+            self.processed_dir / "valid.csv",
             index_col=self.id_column
         )
 
@@ -104,7 +116,7 @@ class DataManager:
             index_col=self.id_column
         )
 
-        return train, test
+        return train, valid, test
     
     def save_model(
         self,
@@ -112,7 +124,7 @@ class DataManager:
         weak_learner_config: dict,
         test: pd.DataFrame,
         model: GBRegressor | GBClassifier,
-        target_transformer: RobustScaler | LabelEncoder
+        target_transformer: RobustScaler | OrdinalEncoder
     ) -> None:
         """Serializes the model and exports all associated run artifacts.
 
@@ -122,14 +134,14 @@ class DataManager:
         test data.
 
         Args:
-            gradient_boosting_config (dict): Hyperparameters for the boosting
-                algorithm.
-            weak_learner_config (dict): Hyperparameters for the weak learners
+            gradient_boosting_config (dict): Hyperparameters for the gradient
+                boosting algorithm.
+            weak_learner_config (dict): Hyperparameters for the weak learners.
+            test (pd.DataFrame): Test data to generate predictions on.
             model (GBRegressor | GBClassifier): The trained gradient boosting
                 model instance.
-            predictions (np.ndarray): Test set predictions.
-            probabilities (np.ndarray): Test set probability predictions, if
-                problem type is classification.
+            target_transformer (RobustScaler | OrdinalEncoder): The target
+                transformer to apply the inverse transformation.
         """
         model_path = self.model_dir / f"{model.end_timestamp}"
         model_path.mkdir(parents=True, exist_ok=True)
@@ -160,13 +172,17 @@ class DataManager:
             "weak_learner_config": weak_learner_config,
             }
             
-        with open(str(model_path / "info.json"), 'w', encoding='utf-8') as file:
+        with open(
+            str(model_path / "info.json"), 'w', encoding='utf-8'
+        ) as file:
             json.dump(info, file, indent=4)
 
-        predictions = model.predict(test)
-        
+        predictions = model.predict(test.to_numpy())
+
         predictions_output = pd.Series(
-            target_transformer.inverse_transform(predictions),
+            target_transformer.inverse_transform(
+                predictions.reshape(-1, 1)
+            ).ravel(),
             index=test.index,
             name=self.target
         )
@@ -174,9 +190,9 @@ class DataManager:
         predictions_output.to_csv(str(model_path / "predictions.csv"))
 
         if self.problem_type == "classification":
-            probabilities = model.predict_proba(test)
+            probabilities = model.predict_proba(test.to_numpy())
             
-            column_names = self.target_transformer.classes_
+            column_names = target_transformer.categories_[-1]
             probabilities_output = pd.DataFrame(
                 probabilities,
                 index=test.index,

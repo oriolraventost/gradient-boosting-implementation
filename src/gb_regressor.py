@@ -89,27 +89,21 @@ class GBRegressor:
 
     def fit(
         self,
-        X_train: pd.DataFrame,
-        y_train: pd.Series,
-        X_valid: pd.DataFrame,
-        y_valid: pd.Series
+        X_train: np.ndarray,
+        y_train: np.ndarray,
+        X_valid: np.ndarray,
+        y_valid: np.ndarray
     ) -> None:
         """Trains the boosting ensemble using stage-wise additive modeling.
 
         Args:
-            X_train (pd.DataFrame): Training feature variables.
-            y_train (pd.Series): Training target variable.
-            X_valid (pd.DataFrame): Validation features variables.
-            y_valid (pd.Series): Validation target variable.
+            X_train (np.ndarray): Training feature variables.
+            y_train (np.ndarray): Training target variable.
+            X_valid (np.ndarray): Validation features variables.
+            y_valid (np.ndarray): Validation target variable.
         """
         start_time = datetime.now()
         self.start_timestamp = start_time.strftime("%Y_%m_%d_%H_%M")
-
-        X_train = X_train.to_numpy()
-        X_valid = X_valid.to_numpy()
-
-        y_train = y_train.to_numpy()
-        y_valid = y_valid.to_numpy()
 
         self.best_iter = 0
         self.best_mse = float('inf')
@@ -166,13 +160,11 @@ class GBRegressor:
         """Aggregates predictions from the base learners.
 
         Args:
-            X (pd.DataFrame): Feature variables to generate predictions for.
+            X (np.ndarray): Feature variables to generate predictions for.
 
         Returns:
             np.ndarray: Regression predictions.
         """
-        X = X.to_numpy()
-
         preds = np.full(len(X), self.initial_constant)
 
         for (weak_learner, colsample_bytree_idx) in self.weak_learners:

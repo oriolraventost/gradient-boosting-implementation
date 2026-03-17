@@ -88,24 +88,21 @@ class GBClassifier:
 
     def fit(
         self,
-        X_train: pd.DataFrame,
-        y_train: pd.Series,
-        X_valid: pd.DataFrame,
-        y_valid: pd.Series
+        X_train: np.ndarray,
+        y_train: np.ndarray,
+        X_valid: np.ndarray,
+        y_valid: np.ndarray
     ) -> None:
         """Trains the boosting ensemble using stage-wise additive modeling.
-        
+
         Args:
-            X_train (pd.DataFrame): Training features.
-            y_train (pd.Series): Training labels.
-            X_valid (pd.DataFrame): Validation features for early stopping.
-            y_valid (pd.Series): Validation labels for early stopping.
+            X_train (np.ndarray): Training feature variables.
+            y_train (np.ndarray): Training target variable.
+            X_valid (np.ndarray): Validation features variables.
+            y_valid (np.ndarray): Validation target variable.
         """
         start_time = datetime.now()
         self.start_timestamp = start_time.strftime("%Y_%m_%d_%H_%M")
-
-        X_train = X_train.to_numpy()
-        X_valid = X_valid.to_numpy()
 
         self.best_iter = 0
         self.best_log_loss = float('inf')
@@ -166,33 +163,30 @@ class GBClassifier:
         end_time = datetime.now()
         self.end_timestamp = end_time.strftime("%Y_%m_%d_%H_%M")
     
-    def predict(self, X: pd.DataFrame) -> np.ndarray:
+    def predict(self, X: np.ndarray) -> np.ndarray:
         """Predict class labels for samples in X.
         
         Args:
-            X (pd.DataFrame): Features to generate predictions for.
+            X (np.ndarray): Features to generate predictions for.
 
         Returns:
             np.ndarray: Predicted class labels.
         """
         proba_preds = self.predict_proba(X)
-        preds = np.argmax(proba_preds, axis=1)
-        return self.label_encoder.inverse_transform(preds)
+        return np.argmax(proba_preds, axis=1)
     
-    def predict_proba(self, X: pd.DataFrame) -> np.ndarray:
+    def predict_proba(self, X: np.ndarray) -> np.ndarray:
         """Predict class probabilities for samples in X.
 
         The predicted class probabilities of an input sample are computed as 
         the softmax of the weighted sum of predictions from the base learners.
         
         Args:
-            X (pd.DataFrame): Features to generate predictions for.
+            X (np.ndarray): Features to generate predictions for.
 
         Returns:
             np.ndarray: The class probabilities of the input samples.
         """
-        X = X.to_numpy()
-
         proba_preds = np.full(
             (len(X), len(self.initial_constant)),
             self.initial_constant
