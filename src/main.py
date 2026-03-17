@@ -1,86 +1,71 @@
-import yaml
 
 from datetime import datetime
-from sklearn.model_selection import train_test_split
 
 from src import *
-from src.data_loader import DataLoader
+from src.data_manager import DataManager
 from src.processor import Processor
 from src.gb_regressor import GBRegressor
 from src.gb_classifier import GBClassifier
 
 def main():
-    """Main workflow for loading data, training, and generating predictions
-    with gradient boosting.
+    """Main workflow for loading data, training, and
+    generating predictions with gradient boosting.
     """
-    with open(CONFIG_PATH, "r") as f:
-        config = yaml.safe_load(f)
+    data_manager = DataManager()
+    
+    datasets_config, modeling_config = data_manager.load_config()
 
-    active_dataset = config["main"]["active_dataset"]
-    active_dataset_config = config["datasets"][active_dataset]
+    active_dataset = modeling_config["main"]["active_dataset"]
+    active_dataset_config = datasets_config[active_dataset]
 
-    weak_learner_key = config["gradient_boosting"]["weak_learner_key"]
-    weak_learner_config = config[weak_learner_key]
+    gradient_boosting_config = modeling_config["gradient_boosting"]
+    weak_learner_key = gradient_boosting_config["weak_learner_key"]
+    weak_learner_config = modeling_config[weak_learner_key]
 
-    data_loader = DataLoader(
-            active_dataset,
-            active_dataset_config["id_column"],
-            active_dataset_config["target"]
-        )
-
-    if config["main"]["run_preprocess"]:
-        raw_train, raw_test = data_loader.load_raw_data()
+    if modeling_config["main"]["run_preprocess"]:  
+        raw_train, raw_test = data_manager.load_raw_data()
 
         processor = Processor(**active_dataset_config)
         train, test = processor.run(raw_train, raw_test)
 
-        data_loader.save_processed_data(train, test)
+        data_manager.save_processed_data(train, test)
     
-    if config["main"]["train_and_predict"]:
-        train, test = data_loader.load_processed_data()
+    else:
+        train, test = data_manager.load_processed_data()
     
-        if active_dataset_config["problem_type"] == "regression":
-            model = GBRegressor(
-                **config["gradient_boosting"],
-                weak_learner_config=weak_learner_config
-            )
-            
-            stratify_col = None
-            prediction_mode = None
-
-        else:       
-            model = GBClassifier(
-                **config["gradient_boosting"],
-                weak_learner_config=weak_learner_config
-            )
-
-            prediction_mode = config["main"]["prediction_mode"]
-            stratify_col = train[active_dataset_config["target"]]
-
-        X_train, X_valid, y_train, y_valid = train_test_split(
-            train.drop(columns=[active_dataset_config["target"]]), 
-            train[active_dataset_config["target"]],
-            stratify=stratify_col,
-            test_size=0.2,
-            random_state=42
+    if modeling_config["main"]["train_and_predict"]:
+        X_train, X_valid, y_train, y_valid = (
+            processor.train_valid_split(train)
         )
         
-        start_time = datetime.now()
-        start_timestamp = start_time.strftime("%Y_%m_%d_%H_%M")
+        if active_dataset_config["problem_type"] == "regression":
+            model = GBRegressor(
+                **gradient_boosting_config,
+                weak_learner_config=weak_learner_config
+            )
+            
+        else:       
+            model = GBClassifier(
+                **gradient_boosting_config,
+                weak_learner_config=weak_learner_config
+            )
 
         model.fit(X_train, y_train, X_valid, y_valid)
-            
-        end_time = datetime.now()
-        end_timestamp = end_time.strftime("%Y_%m_%d_%H_%M")
 
-        data_loader.save_model(
-            model,
-            test,
-            start_timestamp,
-            end_timestamp,
-            config["gradient_boosting"],
+        predictions = model.predict(test)
+        probabilities = (
+            model.predict_proba(test)
+            if active_dataset_config["problem_type"] == "classification"
+            else None
+        )
+
+
+        data_manager.save_model(
+            gradient_boosting_config,
             weak_learner_config,
-            prediction_mode
+            test,
+            model,
+            processor.target_transformer
         )
 
 if __name__=="__main__":

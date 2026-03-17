@@ -3,10 +3,10 @@ import joblib
 import numpy as np
 import pandas as pd
 
+from datetime import datetime
 from sklearn.metrics import log_loss, accuracy_score
 from sklearn.tree import DecisionTreeRegressor
 from sklearn.utils.extmath import softmax
-from sklearn.preprocessing import LabelEncoder
 
 from src.nn_regressor import NNRegressor
 from src.utils import (
@@ -29,8 +29,6 @@ class GBClassifier:
     gradient (pseudo-residuals) of the previous iterations.
 
     Attributes:
-        weak_learner_key (str): Weak learner to use (decision_tree or
-            neural_network).
         n_estimators (int): Maximum number of boosting stages.
         learning_rate (float): Step size shrinkage used in update.
         subsample (float): Fraction of observations to use for each
@@ -40,49 +38,53 @@ class GBClassifier:
         reg_lambda (float): L2 regularization term.
         early_stopping_rounds (int): Maximum number of non-improving
                 iterations allowed.
+        weak_learner_key (str): Weak learner to use (decision_tree or
+            neural_network).
         weak_learner_config (dict): Hyperparameters of weak learner.
         initial_constant (float): Initial constant of boosting ensemble.
         weak_learners (list[tuple(DecisionTreeRegressor, np.ndarray)]): The
             collection of weak learners fitted during training and the
             features they were fitted on.
-        label_encoder (LabelEncoder): Label encoder to transform categories
-            into numbers before one-hot encoding target.
-        best_ce (float): The minimum Cross Entropy recorded on the 
+        best_log_loss (float): The minimum Log Loss recorded on the 
             validation set.
-        best_accuracy (float): The accuracy recorded when Cross Entropy was
+        best_accuracy (float): The accuracy recorded when Log Loss was
             the lowest.
-        best_iter (int): The iteration index that yielded the best_ce.
+        best_iter (int): The iteration index that yielded the best Log Loss.
+        start_timestamp (str | None): Fitting start timestamp.
+        end_timestamp (str | None): Fitting end timestamp.
     """
 
     def __init__(
         self,
-        weak_learner_key: str,
         n_estimators: int,
         learning_rate: float,
         subsample: float,
         colsample_bytree: float,
         reg_lambda: float,
         early_stopping_rounds: int,
+        weak_learner_key: str,
         weak_learner_config: dict
     ):
         """Initializes the gradient boosting classifier."""
-        self.weak_learner_key: str = weak_learner_key
         self.n_estimators: int = n_estimators
         self.learning_rate: float = learning_rate
         self.subsample: float = subsample
         self.colsample_bytree: float = colsample_bytree
         self.reg_lambda: float = reg_lambda
         self.early_stopping_rounds: int = early_stopping_rounds
+
+        self.weak_learner_key: str = weak_learner_key
         self.weak_learner_config = weak_learner_config
         
         self.initial_constant: float | None = None
         self.weak_learners: list[tuple[DecisionTreeRegressor, list]] = []
-
-        self.label_encoder: LabelEncoder = LabelEncoder()
         
-        self.best_ce: float | None = None
+        self.best_log_loss: float | None = None
         self.best_accuracy: float | None = None
         self.best_iter: int | None = None
+
+        self.start_timestamp: str | None = None
+        self.end_timestamp: str | None = None
 
     def fit(
         self,
@@ -99,14 +101,14 @@ class GBClassifier:
             X_valid (pd.DataFrame): Validation features for early stopping.
             y_valid (pd.Series): Validation labels for early stopping.
         """
+        start_time = datetime.now()
+        self.start_timestamp = start_time.strftime("%Y_%m_%d_%H_%M")
+
         X_train = X_train.to_numpy()
         X_valid = X_valid.to_numpy()
 
-        y_train = self.label_encoder.fit_transform(y_train)
-        y_valid = self.label_encoder.transform(y_valid)
-
         self.best_iter = 0
-        self.best_ce = float('inf')
+        self.best_log_loss = float('inf')
         self.best_accuracy = 0.0
 
         n_rows_train, n_cols_train = X_train.shape
@@ -160,6 +162,9 @@ class GBClassifier:
             
             if self._early_stopping_needed(y_valid, valid_preds, iter):
                 break
+
+        end_time = datetime.now()
+        self.end_timestamp = end_time.strftime("%Y_%m_%d_%H_%M")
     
     def predict(self, X: pd.DataFrame) -> np.ndarray:
         """Predict class labels for samples in X.
@@ -233,7 +238,7 @@ class GBClassifier:
     
     def _compute_initial_constant(self, y_train: np.ndarray) -> np.ndarray:
         """Calculates the optimal constant baseline (logarithm of
-        proportions) for CE loss. Recenters logits to have mean zero.
+        proportions) for Log Loss loss. Recenters logits to have mean zero.
         
         Args:
             y_train (np.ndarray): Training target variable.
@@ -360,7 +365,7 @@ class GBClassifier:
             bool: True if training should terminate, False otherwise.
         """
         valid_probabilities = softmax(valid_preds)
-        current_ce = log_loss(
+        current_log_loss = log_loss(
             y_valid,
             valid_probabilities,
             labels=np.arange(valid_preds.shape[1])
@@ -372,12 +377,12 @@ class GBClassifier:
         if not iter % 1:
             logger.info(
                 f"Iteration: {iter} | "
-                f"CE: {current_ce:.6f} | "
-                f"Accuracy: {current_accuracy:.6f}"
+                f"Validation Log Loss: {current_log_loss:.6f} | "
+                f"Validation Accuracy: {current_accuracy:.6f}"
             )
 
-        if current_ce < self.best_ce:
-            self.best_ce = current_ce
+        if current_log_loss < self.best_log_loss:
+            self.best_log_loss = current_log_loss
             self.best_accuracy = current_accuracy
             self.best_iter = iter
             return False

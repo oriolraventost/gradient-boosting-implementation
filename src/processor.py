@@ -1,4 +1,5 @@
 import logging
+import numpy as np
 import pandas as pd
 
 from sklearn.model_selection import train_test_split
@@ -6,6 +7,7 @@ from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
 from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import (
+    LabelEncoder,
     OneHotEncoder,
     RobustScaler
 )
@@ -29,7 +31,10 @@ class Processor:
         problem_type (str): Learning task (regression or classification).
         cat_cols (list[str] | None): List of categorical feature names.
         num_cols (list[str] | None): List of numerical feature names.
-        transformer (ColumnTransformer | None): The Scikit-Learn pipeline.
+        feature_transformer (ColumnTransformer | None): The Scikit-Learn
+            pipeline for transforming feature variables.
+        target_transformer (RobustScaler | LabelEncoder | None): The
+            Scikit-Learn object for transforming the target variable.
     """
 
     def __init__(
@@ -44,9 +49,12 @@ class Processor:
         self.target: str = target
         self.id_column: str = id_column
         self.problem_type: str = problem_type
+        
         self.cat_cols: list[str] = cat_cols
         self.num_cols: list[str] = num_cols
-        self.transformer: ColumnTransformer | None = None
+        
+        self.feature_transformer: ColumnTransformer | None = None
+        self.target_transformer: RobustScaler | LabelEncoder | None = None
     
     def run(
         self,
@@ -69,19 +77,22 @@ class Processor:
         """
         logger.info("Processing pipeline starting...")
 
-        self._get_transformer()
+        self._get_feature_transformer()
+        self._get_target_transformer()
 
         train_data = self._cut_data(train_data)
         
         logger.info("Fitting and transforming training data...")
-        processed_train_data = self.transformer.fit_transform(
+        processed_train_data = self.feature_transformer.fit_transform(
             train_data
         )
         processed_train_data.index = train_data.index
-        processed_train_data[self.target] = train_data[self.target]
+        processed_train_data[self.target] = (
+            self.target_transformer.fit_transform(train_data[self.target])
+        )
 
         logger.info("Transforming test data...")
-        processed_test_data = self.transformer.transform(test_data)
+        processed_test_data = self.feature_transformer.transform(test_data)
         processed_test_data.index = test_data.index
 
         self._drop_duplicate_and_constant(
@@ -90,8 +101,42 @@ class Processor:
         )
 
         return processed_train_data, processed_test_data
+    
+    def train_valid_split(
+        self,
+        data: pd.DataFrame
+    ) -> tuple[pd.DataFrame, pd.DataFrame]:
 
-    def _get_transformer(self) -> None:
+        stratify_col = (
+            data[self.target] if self.problem_type == "classification"
+            else None
+        )
+
+        return train_test_split(
+            data.drop(columns=[self.target]), 
+            data[self.target],
+            stratify=stratify_col,
+            test_size=0.2,
+            random_state=42
+        )
+
+    def _inverse_transform_target(self, data: np.ndarray) -> np.ndarray:
+        """Reverts the target variable to its original scale or labels.
+
+        Applies the inverse transformation using the previously fitted 
+        target transformer.
+
+        Args:
+            data (np.ndarray): A numpy array containing the transformed target
+                values or model predictions.
+
+        Returns:
+            np.ndarray: The target data mapped back to its original 
+                distribution or categorical labels.
+        """
+        return self.target_transformer.inverse_transform(data)
+
+    def _get_feature_transformer(self) -> None:
         """Initialize the feature engineering pipeline for numeric and
         categorical attributes.
 
@@ -118,13 +163,30 @@ class Processor:
             ('scale', RobustScaler())
         ])
 
-        self.transformer = ColumnTransformer(
+        self.feature_transformer = ColumnTransformer(
             transformers=[
                 ("cat", cat_pipeline, self.cat_cols),
                 ("num", num_pipeline, self.num_cols),
             ],
             verbose_feature_names_out=False
         ).set_output(transform="pandas")
+    
+    def _get_target_transformer(self) -> RobustScaler | LabelEncoder:
+        """Initializes the appropriate target transformer based on
+        the problem type.
+
+        Selects a scaler for continuous target variables or an
+        encoder for categorical labels in classification tasks.
+
+        Returns:
+            RobustScaler | LabelEncoder: A Scikit-Learn object for
+                trasforming the target variable.
+        """
+        if self.problem_type == "regression":
+            return RobustScaler()
+        
+        else:
+            return LabelEncoder()
     
     def _cut_data(
         self,

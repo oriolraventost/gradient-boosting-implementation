@@ -3,8 +3,9 @@ import joblib
 import numpy as np
 import pandas as pd
 
+from datetime import datetime
 from sklearn.tree import DecisionTreeRegressor
-from sklearn.metrics import mean_squared_error
+from sklearn.metrics import mean_squared_error, r2_score
 
 from src.nn_regressor import NNRegressor
 from src.utils import (
@@ -27,8 +28,6 @@ class GBRegressor:
     variable to mean 0 and std 1.
 
     Attributes:
-        weak_learner_key (str): Weak learner to use (decision_tree or
-            neural_network).
         n_estimators (int): Maximum number of boosting stages.
         learning_rate (float): Step size shrinkage used in update.
         subsample (float): Fraction of observations to use for each
@@ -38,6 +37,8 @@ class GBRegressor:
         reg_lambda (float): L2 regularization term.
         early_stopping_rounds (int): Maximum number of non-improving
                 iterations allowed.
+        weak_learner_key (str): Weak learner to use (decision_tree or
+            neural_network).
         weak_learner_config (dict): Hyperparameters of weak learner.
         initial_constant (float): Initial constant of boosting ensemble.
         weak_learners (list[tuple[DecisionTreeRegressor | NNRegressor,
@@ -45,32 +46,33 @@ class GBRegressor:
             training and the features they were fitted on.
         best_mse (float): The minimum Mean Squared Error recorded on the 
             validation set.
+        best_r2 (float): The R^2 recorded when Mean Squared Error was
+            the lowest.
         best_iter (int): The iteration index that yielded the best_mse.
-        target_median (float): Median value of the target variable in the
-            training data.
-        target_iqr (float): IQR value of the target variable in the
-            training data.
+        start_timestamp (str | None): Fitting start timestamp.
+        end_timestamp (str | None): Fitting end timestamp.
     """
 
     def __init__(
         self,
-        weak_learner_key: str,
         n_estimators: int,
         learning_rate: float,
         subsample: float,
         colsample_bytree: float,
         reg_lambda: float,
         early_stopping_rounds: int,
+        weak_learner_key: str,
         weak_learner_config: dict
     ):
         """Initializes the model structure."""
-        self.weak_learner_key: str = weak_learner_key
         self.n_estimators: int = n_estimators
         self.learning_rate: float = learning_rate
         self.subsample: float = subsample
         self.colsample_bytree: float = colsample_bytree
         self.reg_lambda: float = reg_lambda
         self.early_stopping_rounds: int = early_stopping_rounds
+
+        self.weak_learner_key: str = weak_learner_key
         self.weak_learner_config: dict = weak_learner_config
         
         self.initial_constant: float | None = None
@@ -79,10 +81,11 @@ class GBRegressor:
         ] = []
         
         self.best_mse: float | None = None
+        self.best_r2: float | None = None
         self.best_iter: int | None = None
 
-        self.target_min: float | None = None
-        self.target_max: float | None = None
+        self.start_timestamp: str | None = None
+        self.end_timestamp: str | None = None
 
     def fit(
         self,
@@ -99,6 +102,9 @@ class GBRegressor:
             X_valid (pd.DataFrame): Validation features variables.
             y_valid (pd.Series): Validation target variable.
         """
+        start_time = datetime.now()
+        self.start_timestamp = start_time.strftime("%Y_%m_%d_%H_%M")
+
         X_train = X_train.to_numpy()
         X_valid = X_valid.to_numpy()
 
@@ -109,15 +115,6 @@ class GBRegressor:
         self.best_mse = float('inf')
 
         n_rows_train, n_cols_train = X_train.shape
-
-        self.target_median = np.median(y_train)
-
-        q1 = np.quantile(y_train, 0.25)
-        q3 = np.quantile(y_train, 0.75)
-        self.target_iqr = q3 - q1
-
-        y_train = (y_train - self.target_median) / self.target_iqr
-        y_valid = (y_valid - self.target_median) / self.target_iqr
 
         self.initial_constant = self._compute_initial_constant(y_train)
         
@@ -161,10 +158,12 @@ class GBRegressor:
             
             if self._early_stopping_needed(y_valid, valid_preds, iter):
                 break
-    
+            
+        end_time = datetime.now()
+        self.end_timestamp = end_time.strftime("%Y_%m_%d_%H_%M")
+            
     def predict(self, X: pd.DataFrame) -> np.ndarray:
         """Aggregates predictions from the base learners.
-        Scales them back using mean and STD of the training data.
 
         Args:
             X (pd.DataFrame): Feature variables to generate predictions for.
@@ -183,8 +182,7 @@ class GBRegressor:
 
             preds += update.reshape(preds.shape)
 
-        scaled_preds = self.target_iqr * preds + self.target_median
-        return scaled_preds
+        return preds
 
     def save_model(self, file_path: str) -> None:
         """Saves the initial constant, the weak learners and the features
@@ -340,15 +338,18 @@ class GBRegressor:
             bool: True if training should terminate, False otherwise.
         """
         current_mse = mean_squared_error(y_valid, valid_preds)
+        current_r2 = r2_score(y_valid, valid_preds)
 
         if not iter % 1:
             logger.info(
                 f"Iteration: {iter} | "
-                f"MSE validation loss: {current_mse:.8f}"
+                f"Validation MSE: {current_mse:.6f} | "
+                f"Validation R^2: {current_r2:.6f} "
             )
 
         if current_mse < self.best_mse:
             self.best_mse = current_mse
+            self.best_r2 = current_r2
             self.best_iter = iter
             return False
         
