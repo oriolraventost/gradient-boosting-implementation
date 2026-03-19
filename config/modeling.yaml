@@ -1,14 +1,14 @@
 main:
-  active_dataset: "scores"
+  active_dataset: "cifar10"
   run_preprocess: true
-  train_and_predict: false
+  train_and_predict: true
 
 gradient_boosting:
-  weak_learner_key: "decision_tree"
-  n_estimators: 10000
+  weak_learner_key: "convolutional_neural_network"
+  n_estimators: 1
   learning_rate: 0.3
   subsample: 0.8
-  colsample_bytree: 0.8
+  colsample_bytree: 1.0
   reg_lambda: 1.0
   early_stopping_rounds: 25
 
@@ -16,5 +16,10 @@ decision_tree:
   max_depth: 5
 
 neural_network:
-  hidden_size: 32
-  batch_size: 32
+  hidden_size: 16
+  batch_size: 16
+
+convolutional_neural_network:
+  kernel_size: 5
+  hidden_channels: 16
+  batch_size: 16

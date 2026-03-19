@@ -210,3 +210,6 @@ __marimo__/
 *.CSV
 *.joblib
 *.json
+
+# Data folder
+data/

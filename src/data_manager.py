@@ -5,6 +5,8 @@ import yaml
 
 from pathlib import Path
 from sklearn.preprocessing import RobustScaler, OrdinalEncoder
+from torchvision import datasets
+from torch.utils.data import Subset, random_split
 
 from src import *
 from src.gb_regressor import GBRegressor
@@ -20,6 +22,7 @@ class DataManager:
         id_column (str | None): The column name used as the identifier.
         target (str | None): The column name for the target variable.
         problem_type (str | None): Regression or classification.
+        test_index (list[int] | None): List of indeces for test predictions.
     """
 
     def __init__(self):
@@ -31,6 +34,8 @@ class DataManager:
         self.id_column: str | None = None
         self.target: str | None = None
         self.problem_type: str | None = None
+
+        self.test_index: list[int] | None = None
 
     def load_config(self) -> tuple[dict, dict]:
         """Loads the configuration from a YAML file.
@@ -46,18 +51,19 @@ class DataManager:
             modeling_config = yaml.safe_load(f)
         
         active_dataset = modeling_config["main"]["active_dataset"]
-        
-        self.raw_dir = Path(DATA_PATH) / active_dataset / "raw"
 
-        self.processed_dir = Path(DATA_PATH) / active_dataset / "processed"
-        self.processed_dir.mkdir(parents=True, exist_ok=True)
-        
-        self.model_dir = Path(MODELS_PATH) / active_dataset
-        self.model_dir.mkdir(parents=True, exist_ok=True)
-        
         self.id_column = datasets_config[active_dataset]["id_column"]
         self.target = datasets_config[active_dataset]["target"]
         self.problem_type = datasets_config[active_dataset]["problem_type"]
+        
+        if self.problem_type != "computer_vision":
+            self.raw_dir = Path(DATA_PATH) / active_dataset / "raw"
+            
+            self.processed_dir = Path(DATA_PATH) / active_dataset / "processed"
+            self.processed_dir.mkdir(parents=True, exist_ok=True)
+        
+        self.model_dir = Path(MODELS_PATH) / active_dataset
+        self.model_dir.mkdir(parents=True, exist_ok=True)
 
         return datasets_config, modeling_config
     
@@ -72,6 +78,11 @@ class DataManager:
 
         train = pd.read_csv(train_path, index_col=self.id_column)
         test = pd.read_csv(test_path, index_col=self.id_column)
+
+        train_size = len(train)
+        test_size = len(test)
+
+        self.test_index = range(train_size, train_size + test_size)
         
         return train, test
     
@@ -118,6 +129,64 @@ class DataManager:
 
         return train, valid, test
     
+    def load_image_data(
+        self,
+        active_dataset: str
+    ) -> tuple[Subset, Subset, np.ndarray]:
+        """Loads image data and performs a random train-validation split.
+
+        This method identifies the requested dataset, downloads it to a 
+        local directory if not already present, and splits the official 
+        training set into training and validation subsets using an 80/20
+        ratio.
+
+        Args:
+            active_dataset (str): The name of the dataset to load. 
+                Supported values are 'mnist' and 'cifar10'.
+
+        Returns:
+            tuple: A tuple containing the training, validation and test
+                data, the latter without the target.
+        """
+        image_data_map = {
+            "MNIST": datasets.MNIST,
+            "cifar10": datasets.CIFAR10
+        }
+
+        image_data_class = image_data_map[active_dataset]
+
+        full_train_set = image_data_class(
+            root=f"{DATA_PATH}/{active_dataset}",
+            train=True,
+            download=True
+        )
+
+        train_size = int(0.8 * len(full_train_set))
+        valid_size = len(full_train_set) - train_size
+        
+        train_set, valid_set = random_split(
+           full_train_set, 
+            [train_size, valid_size]
+        )
+        
+        test_set = image_data_class(
+            root=f"{DATA_PATH}/{active_dataset}",
+            train=False,
+            download=True
+        )
+
+        test_set = Subset(
+            test_set, 
+            list(range(len(test_set)))
+        )
+
+        full_train_size = len(full_train_set)
+        test_size = len(test_set)
+
+        self.test_index = range(full_train_size, full_train_size + test_size)
+
+        return train_set, valid_set, test_set
+
     def save_model(
         self,
         gradient_boosting_config: dict,
@@ -148,16 +217,16 @@ class DataManager:
 
         model.save_model(str(model_path / "model.joblib"))
 
-        if self.problem_type == "classification":
+        if self.problem_type == "regression":
             best_score = {
-                "best_log_loss": round(model.best_log_loss, 6),
-                "best_accuracy": round(model.best_accuracy, 6)
+                "best_mse": round(model.best_mse, 6),
+                "best_r2": round(model.best_r2, 6)
             }
         
         else:
             best_score = {
-                "best_mse": round(model.best_mse, 6),
-                "best_r2": round(model.best_r2, 6)
+                "best_log_loss": round(model.best_log_loss, 6),
+                "best_accuracy": round(model.best_accuracy, 6)
             }
 
         info = {
@@ -177,26 +246,28 @@ class DataManager:
         ) as file:
             json.dump(info, file, indent=4)
 
-        predictions = model.predict(test.to_numpy())
+        predictions = model.predict(test)
 
         predictions_output = pd.Series(
             target_transformer.inverse_transform(
                 predictions.reshape(-1, 1)
             ).ravel(),
-            index=test.index,
+            index=self.test_index,
             name=self.target
         )
-        
+
+        predictions_output.index.name = self.id_column
         predictions_output.to_csv(str(model_path / "predictions.csv"))
 
-        if self.problem_type == "classification":
-            probabilities = model.predict_proba(test.to_numpy())
+        if self.problem_type != "regression":
+            probabilities = model.predict_proba(test)
             
             column_names = target_transformer.categories_[-1]
             probabilities_output = pd.DataFrame(
                 probabilities,
-                index=test.index,
+                index=self.test_index,
                 columns=column_names
             )
 
+            probabilities_output.index.name = self.id_column
             probabilities_output.to_csv(str(model_path / "probabilities.csv"))

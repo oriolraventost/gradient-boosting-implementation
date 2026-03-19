@@ -15,6 +15,8 @@ def main():
     active_dataset = modeling_config["main"]["active_dataset"]
     active_dataset_config = datasets_config[active_dataset]
 
+    problem_type = active_dataset_config["problem_type"]
+
     gradient_boosting_config = modeling_config["gradient_boosting"]
     
     weak_learner_key = gradient_boosting_config["weak_learner_key"]
@@ -22,27 +24,27 @@ def main():
 
     processor = Processor(**active_dataset_config)
 
-    if modeling_config["main"]["run_preprocess"]:  
-        raw_train, raw_test = data_manager.load_raw_data()
-        
-        train, valid, test = processor.transform_features(raw_train, raw_test)
-        data_manager.save_processed_data(train, valid, test)
+    if problem_type == "computer_vision":
+        train, valid, test = data_manager.load_image_data(
+            active_dataset
+        )
     
     else:
-        train, valid, test = data_manager.load_processed_data()
-    
-    if modeling_config["main"]["train_and_predict"]:
-        target = active_dataset_config["target"]
+        if modeling_config["main"]["run_preprocess"]:  
+            raw_train, raw_test = data_manager.load_raw_data()
+            
+            train, valid, test = processor.transform_features(raw_train, raw_test)
+            data_manager.save_processed_data(train, valid, test)
         
-        X_train, X_valid = (
-            train.drop(columns=[target]).values,
-            valid.drop(columns=[target]).values
-        )
+        else:
+            train, valid, test = data_manager.load_processed_data()
+        
+    if modeling_config["main"]["train_and_predict"]:        
+        X_train, y_train = processor.split_features_target(train)
+        X_valid, y_valid = processor.split_features_target(valid)
 
-        y_train, y_valid = processor.transform_target(
-            train[target],
-            valid[target]
-        )
+        print(X_train.shape)
+        y_train, y_valid = processor.transform_target(y_train, y_valid)
         
         if active_dataset_config["problem_type"] == "regression":
             model = GBRegressor(
@@ -58,6 +60,8 @@ def main():
 
         model.fit(X_train, y_train, X_valid, y_valid)
 
+        test = processor.convert_to_numpy(test)
+        print(test.shape)
         data_manager.save_model(
             gradient_boosting_config,
             weak_learner_config,

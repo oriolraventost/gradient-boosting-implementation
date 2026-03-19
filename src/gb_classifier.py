@@ -9,6 +9,7 @@ from sklearn.tree import DecisionTreeRegressor
 from sklearn.utils.extmath import softmax
 
 from src.nn_regressor import NNRegressor
+from src.cnn_regressor import CNNRegressor
 from src.utils import (
     first_derivative_log_loss,
     second_derivative_log_loss
@@ -108,7 +109,7 @@ class GBClassifier:
         self.best_log_loss = float('inf')
         self.best_accuracy = 0.0
 
-        n_rows_train, n_cols_train = X_train.shape
+        n_rows_train, n_cols_train, *extra = X_train.shape
         
         self.initial_constant = self._compute_initial_constant(y_train)
         
@@ -139,7 +140,7 @@ class GBClassifier:
             )
 
             oob_idx = np.setdiff1d(np.arange(n_rows_train), subsample_idx)
-            oob_preds = weak_learner.predict(X_train[oob_idx][:, colsample_bytree_idx])
+            oob_preds = weak_learner.predict(X_train[oob_idx])
             oob_mse = np.mean((pseudo_residuals[oob_idx] - oob_preds) ** 2)
             logger.info(f"OOB MSE: {oob_mse:.6f}")
             
@@ -331,6 +332,9 @@ class GBClassifier:
         
         elif self.weak_learner_key == "neural_network":
             weak_learner = NNRegressor(**self.weak_learner_config)
+        
+        elif self.weak_learner_key == "convolutional_neural_network":
+            weak_learner = CNNRegressor(**self.weak_learner_config)
         
         else:
             raise ValueError(

@@ -2,6 +2,7 @@ import logging
 import numpy as np
 import pandas as pd
 
+from torch.utils.data import Subset
 from sklearn.model_selection import train_test_split
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
@@ -41,17 +42,17 @@ class Processor:
         self,
         id_column: str,
         target: str,
-        cat_cols: list[str],
-        num_cols: list[str],
-        problem_type: str
+        problem_type: str,
+        cat_cols: list[str] | None = None,
+        num_cols: list[str] | None = None,
     ):
         """Initializes the processor."""
         self.target: str = target
         self.id_column: str = id_column
         self.problem_type: str = problem_type
         
-        self.cat_cols: list[str] = cat_cols
-        self.num_cols: list[str] = num_cols
+        self.cat_cols: list[str] | None = cat_cols
+        self.num_cols: list[str] | None = num_cols
         
         self.feature_transformer: ColumnTransformer | None = None
         self.target_transformer: RobustScaler | OrdinalEncoder | None = None
@@ -112,8 +113,8 @@ class Processor:
 
     def transform_target(
         self,
-        y_train: pd.Series,
-        y_valid: pd.Series
+        y_train: np.ndarray,
+        y_valid: np.ndarray
     ) -> tuple[np.ndarray, np.ndarray]:
         """ Fits the target transformer and transforms training and
         validation targets.
@@ -123,8 +124,8 @@ class Processor:
         transformers and flattens the output back to 1D arrays.
 
         Args:
-            y_train (pd.Series): Training target values.
-            y_valid (pd.Series): Validation target values.
+            y_train (np.ndarray): Training target values.
+            y_valid (np.ndarray): Validation target values.
 
         Returns:
             tuple[np.ndarray, np.ndarray]: A tuple containing the
@@ -137,15 +138,86 @@ class Processor:
             self.target_transformer = OrdinalEncoder()
         
         processed_y_train = self.target_transformer.fit_transform(
-            y_train.values.reshape(-1, 1)
+            y_train.reshape(-1, 1)
         ).ravel()
         
         processed_y_valid = self.target_transformer.transform(
-            y_valid.values.reshape(-1, 1)
+            y_valid.reshape(-1, 1)
         ).ravel()
 
         return processed_y_train, processed_y_valid
 
+    def split_features_target(
+        self,
+        data: pd.DataFrame | Subset
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Splits input data into feature and target arrays.
+
+        Handles both computer vision datasets and tabular pandas DataFrames.
+        For image data, it performs normalization and adds a channel dimension
+        if necessary. For tabular data, it extracts the target column based on
+        the configured target attribute.
+
+        Args:
+            data (pd.DataFrame | Subset): The input data. If problem_type is 
+                computer_vision, this is expected to be a Torchvision 
+                Subset object. Otherwise, a pandas DataFrame.
+
+        Returns:
+            tuple[np.ndarray, np.ndarray]: A tuple containing the feature and
+                target arrays.
+        """
+        if self.problem_type == "computer_vision":
+            X = data.dataset.data[data.indices]
+            y = np.array(data.dataset.targets)[data.indices]
+            
+            if not isinstance(X, np.ndarray):
+                X = X.numpy()
+
+            X = X.astype(np.float32) / 255.0
+
+            if X.ndim == 3:
+                X = np.expand_dims(X, -1)
+            
+            X = X.transpose(0, 3, 1, 2)
+            
+            y = np.array(y).astype(np.float32)
+        
+        else:
+            X = data.drop(columns=[self.target]).values
+            y = data[self.target].values
+        
+        return X, y
+
+    def convert_to_numpy(self, data: pd.DataFrame | Subset) -> np.ndarray:
+        """Converts various data structures into a unified NumPy array format.
+
+        This method handles extraction from PyTorch Subsets (common in 
+        computer vision) and pandas DataFrames (common in tabular tasks).
+
+        Args:
+            data (pd.DataFrame | Subset): The input data structure. 
+                Can be a pandas DataFrame or a torch.utils.data.Subset.
+
+        Returns:
+            np.ndarray: The data converted to a NumPy array.
+        """
+        if isinstance(data, Subset):
+            data = data.dataset.data[data.indices]
+        
+            if not isinstance(data, np.ndarray):
+                data = data.numpy()
+            
+            if data.ndim == 3:
+                data = np.expand_dims(data, -1)
+            
+            data = data.transpose(0, 3, 1, 2)
+        
+        else:
+            data = data.to_numpy()
+        
+        return data
+    
     def _get_feature_transformer(self):
         """Initialize the feature engineering pipeline for numeric and
         categorical attributes.

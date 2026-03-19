@@ -87,3 +87,13 @@ insurance:
     - "Credit Score"
     - "Insurance Duration"
   problem_type: "regression"
+
+mnist:
+  id_column: "id"
+  target: "Label"
+  problem_type: "computer_vision"
+
+cifar10:
+  id_column: "id"
+  target: "label"
+  problem_type: "computer_vision"
