@@ -16,24 +16,30 @@ class CNNRegressor(nn.Module):
     """A PyTorch convolutional neural network regressor.
 
     Attributes:
-        kernel_size (int): Size of convolution kernel.
-        hidden_channels (int): Number of channels in convolution hidden layer.
-        batch_size (int): Batch size for parallel processing.
-        network (nn.Sequential): The core deep learning layers.
-        device (torch.device): The hardware where the model is loaded.
+        channels (int): Number of output channels for conv layers.
+        kernel_size (int): Size of the square convolution kernel.
+        pool_size (int): Size of the max pooling window.
+        hidden_size (int): Number of neurons in the fully connected layer.
+        batch_size (int): Size of training batches.
+        network (nn.Sequential): The sequential container of model layers.
+        device (torch.device): Hardware device (CPU/CUDA) used for tensors.
     """
 
     def __init__(
         self,
+        channels: int,
         kernel_size: int,
-        hidden_channels: int,
+        pool_size: int,
+        hidden_size: int,
         batch_size: int
     ):
-        """Initializes the neural network regressor."""
+        """Initializes the convolutional neural network regressor."""
         super().__init__()
         
+        self.channels: int = channels
         self.kernel_size: int = kernel_size
-        self.hidden_channels: int = hidden_channels
+        self.pool_size: int = pool_size
+        self.hidden_size: int = hidden_size
         self.batch_size: int = batch_size
         
         self.network: nn.Sequential | None = None
@@ -46,28 +52,31 @@ class CNNRegressor(nn.Module):
         self.to(self.device)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Standard PyTorch forward pass.
+        """Performs the forward pass of the model.
 
         Args:
-            x (torch.Tensor): Tensor of features.
+            x (torch.Tensor): Input tensor of shape (N, C, H, W).
 
         Returns:
-            torch.Tensor: Output values.
-        """        
+            torch.Tensor: Regression predictions.
+        """      
         return self.network(x)
 
     def fit(self, X: np.ndarray, y: np.ndarray) -> None:
-        """Trains the network using an Adam optimizer and OneCycleLR
-        scheduler. Includes gradient norm clipping.
+        """Trains the model using the provided features and labels.
 
         Args:
-            X (np.ndarray): Features.
-            y (np.ndarray): Labels.
+            X (np.ndarray): Training features.
+            y (np.ndarray): Target regression values.
         """
         in_channels = X.shape[1]
         output_size = y.shape[1] if len(y.shape) > 1 else 1
-
-        self._get_network(in_channels, output_size)
+        
+        image_size = X.shape[-1]
+        conv1_out = (image_size - (self.kernel_size - 1)) / self.pool_size
+        linear_input = (conv1_out - self.kernel_size - 1) / self.pool_size
+        
+        self._get_network(in_channels, int(linear_input), output_size)
 
         loader = self._prepare_loader(X, y)
         
@@ -88,13 +97,13 @@ class CNNRegressor(nn.Module):
             optimizer.step()
 
     def predict(self, X: np.ndarray) -> np.ndarray:
-        """Generates regression predictions for the given input data.
+        """Generates predictions for the input data.
 
         Args:
             X (np.ndarray): Input feature matrix.
 
         Returns:
-            np.ndarray: Flattened array of numerical predictions.
+            np.ndarray: Numerical predictions as a NumPy array.
         """
         X_t = torch.from_numpy(X).to(torch.float32)
         X_t = X_t.to(self.device)
@@ -105,29 +114,34 @@ class CNNRegressor(nn.Module):
         
         return predictions.cpu().numpy()
 
-    def _get_network(self, in_channels: int, output_size: int) -> None:
-        """Defines the feed-forward neural network architecture.
-
-        Constructs a multi-layer perceptron (MLP) with two hidden layers, 
-        incorporating Batch Normalization and Dropout for regularization. 
+    def _get_network(
+        self,
+        in_channels: int,
+        linear_input: int,
+        output_size: int
+    ) -> None:
+        """Builds the nn.Sequential network architecture.
 
         Args:
-            input_size (int): The number of input features.
-            output_size (int): The dimension of the target.
+            in_channels (int): Number of input image channels.
+            linear_input (int): Flattened size after conv/pool layers.
+            output_size (int): Dimension of the target output.
         """
         self.network = nn.Sequential(
-            nn.Conv2d(
-                in_channels,
-                self.hidden_channels,
-                self.kernel_size,
-                padding="same"
-            ),
+            nn.Conv2d(in_channels, self.channels, self.kernel_size),
             nn.GELU(),
+            nn.MaxPool2d(self.pool_size),
 
-            nn.AdaptiveAvgPool2d(1),
+            nn.Conv2d(self.channels, self.channels, self.kernel_size),
+            nn.GELU(),
+            nn.MaxPool2d(self.pool_size),
+
             nn.Flatten(),
             
-            nn.Linear(self.hidden_channels, output_size)
+            nn.Linear(linear_input, self.hidden_size),
+            nn.GELU(),
+
+            nn.Linear(self.hidden_size, output_size)
         )
 
         self.network.to(self.device)
@@ -137,14 +151,14 @@ class CNNRegressor(nn.Module):
         X: np.ndarray, 
         y: np.ndarray
     ) -> tuple[DataLoader, DataLoader]:
-        """Converts NumPy arrays into PyTorch DataLoader.
+        """Wraps NumPy arrays into a shuffled PyTorch DataLoader.
 
         Args:
-            X (np.ndarray): Feature matrix of shape (n_samples, n_features).
-            y (np.ndarray): Target vector of shape (n_samples,).
+            X (np.ndarray): Input features.
+            y (np.ndarray): Target labels.
 
         Returns:
-            DataLoader: Shuffled DataLoader for training.
+            DataLoader: Prepared training data loader.
         """
         X_t = torch.from_numpy(X).to(torch.float32)
         y_t = torch.from_numpy(y).to(torch.float32)

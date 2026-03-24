@@ -20,6 +20,8 @@ neural_network:
   batch_size: 16
 
 convolutional_neural_network:
+  channels: 16
   kernel_size: 5
-  hidden_channels: 16
+  pool_size: 2
+  hidden_size: 64
   batch_size: 16

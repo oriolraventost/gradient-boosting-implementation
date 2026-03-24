@@ -1,7 +1,6 @@
 import logging
 import joblib
 import numpy as np
-import pandas as pd
 
 from datetime import datetime
 from sklearn.tree import DecisionTreeRegressor
@@ -20,37 +19,30 @@ logging.basicConfig(
 )
 
 class GBRegressor:
-    """Gradient boosting regression supporting subsampling and early stopping.
-    
-    This model implements a stage-wise additive ensemble that minimizes Mean 
-    Squared Error (MSE) by fitting subsequent weak learners to the negative
-    gradient (pseudo-residuals) of the previous iterations. Scales target
-    variable to mean 0 and std 1.
+    """Gradient boosting regressor with subsampling and early stopping.
+
+    This model implements a stage-wise additive ensemble that minimizes MSE by
+    fitting weak learners to the regularized Newton step of the loss function.
 
     Attributes:
         n_estimators (int): Maximum number of boosting stages.
-        learning_rate (float): Step size shrinkage used in update.
-        subsample (float): Fraction of observations to use for each
-            weak learner.
-        colsample_bytree (float): Fraction of features to use for 
-            each weak learner.
-        reg_lambda (float): L2 regularization term.
-        early_stopping_rounds (int): Maximum number of non-improving
-                iterations allowed.
-        weak_learner_key (str): Weak learner to use (decision_tree or
-            neural_network).
-        weak_learner_config (dict): Hyperparameters of weak learner.
-        initial_constant (float): Initial constant of boosting ensemble.
-        weak_learners (list[tuple[DecisionTreeRegressor | NNRegressor,
-            list]]): The collection of weak learners fitted during
-            training and the features they were fitted on.
-        best_mse (float): The minimum Mean Squared Error recorded on the 
-            validation set.
-        best_r2 (float): The R^2 recorded when Mean Squared Error was
-            the lowest.
-        best_iter (int): The iteration index that yielded the best_mse.
-        start_timestamp (str | None): Fitting start timestamp.
-        end_timestamp (str | None): Fitting end timestamp.
+        learning_rate (float): Step size shrinkage used in each update.
+        subsample (float): Fraction of samples used for each weak learner.
+        colsample_bytree (float): Fraction of features used for each learner.
+        reg_lambda (float): L2 regularization term for the Newton step.
+        early_stopping_rounds (int): Iterations allowed without MSE
+            improvement.
+        weak_learner_key (str): Type of learner.
+        weak_learner_config (dict): Hyperparameters for the weak learners.
+        initial_constant (float): The global mean of the target variable.
+        weak_learners (list): Fitted learners and their associated feature
+            indices.
+        best_mse (float): Lowest recorded Mean Squared Error on validation
+            set.
+        best_r2 (float): R^2 score corresponding to the best_mse.
+        best_iter (int): Iteration index that achieved best_mse.
+        start_timestamp (str): Formatted start time of the fit process.
+        end_timestamp (str): Formatted end time of the fit process.
     """
 
     def __init__(
@@ -64,7 +56,7 @@ class GBRegressor:
         weak_learner_key: str,
         weak_learner_config: dict
     ):
-        """Initializes the model structure."""
+        """Initializes the gradient boosting regressor."""
         self.n_estimators: int = n_estimators
         self.learning_rate: float = learning_rate
         self.subsample: float = subsample
@@ -94,13 +86,13 @@ class GBRegressor:
         X_valid: np.ndarray,
         y_valid: np.ndarray
     ) -> None:
-        """Trains the boosting ensemble using stage-wise additive modeling.
+        """Trains the ensemble using stage-wise additive modeling.
 
         Args:
-            X_train (np.ndarray): Training feature variables.
-            y_train (np.ndarray): Training target variable.
-            X_valid (np.ndarray): Validation features variables.
-            y_valid (np.ndarray): Validation target variable.
+            X_train (np.ndarray): Training features.
+            y_train (np.ndarray): Training targets.
+            X_valid (np.ndarray): Validation features.
+            y_valid (np.ndarray): Validation targets.
         """
         start_time = datetime.now()
         self.start_timestamp = start_time.strftime("%Y_%m_%d_%H_%M")
@@ -130,11 +122,6 @@ class GBRegressor:
                 X_train[subsample_idx][:, colsample_bytree_idx],
                 pseudo_residuals[subsample_idx]
             )
-
-            oob_idx = np.setdiff1d(np.arange(n_rows_train), subsample_idx)
-            oob_preds = weak_learner.predict(X_train[oob_idx][:, colsample_bytree_idx])
-            oob_mse = np.mean((pseudo_residuals[oob_idx] - oob_preds) ** 2)
-            logger.info(f"OOB MSE: {oob_mse:.6f}")
             
             train_update = self.learning_rate * weak_learner.predict(
                 X_train[:, colsample_bytree_idx]
@@ -156,14 +143,14 @@ class GBRegressor:
         end_time = datetime.now()
         self.end_timestamp = end_time.strftime("%Y_%m_%d_%H_%M")
             
-    def predict(self, X: pd.DataFrame) -> np.ndarray:
-        """Aggregates predictions from the base learners.
+    def predict(self, X: np.ndarray) -> np.ndarray:
+        """Aggregates predictions from all fitted weak learners.
 
         Args:
-            X (np.ndarray): Feature variables to generate predictions for.
+            X (np.ndarray): Input features for prediction.
 
         Returns:
-            np.ndarray: Regression predictions.
+            np.ndarray: Predicted regression values.
         """
         preds = np.full(len(X), self.initial_constant)
 
@@ -177,11 +164,10 @@ class GBRegressor:
         return preds
 
     def save_model(self, file_path: str) -> None:
-        """Saves the initial constant, the weak learners and the features
-        they have been fitted on in a joblib file.
+        """Saves the model state to a joblib artifact.
 
         Args:
-            file_path (str): Destination path for the artifact.
+            file_path (str): Destination path for the saved model.
         """
         model_data = {
             "initial_constant": self.initial_constant,
@@ -193,7 +179,7 @@ class GBRegressor:
         logger.info(f"Model saved to {file_path}")
 
     def load_model(self, file_path: str) -> None:
-        """Loads a previously saved model from a joblib file.
+        """Loads a model state from a joblib artifact.
 
         Args:
             file_path (str): Path to the saved model file.
@@ -206,50 +192,39 @@ class GBRegressor:
         self.weak_learners = model_data["weak_learners"]
     
     def _compute_initial_constant(self, y_train: np.ndarray) -> float:
-        """Calculates the optimal constant baseline (mean) for MSE loss.
-        
+        """Calculates the mean target value as the starting baseline.
+
         Args:
             y_train (np.ndarray): Training target variable.
-        
+
         Returns:
-            float: Constant value minimizing the loss function if taken
-                as the prediction for all the observations (mean).
+            float: Mean of the target variable.
         """
         return y_train.mean()
 
     def _draw_subsample(
         self,
-        n_rows_train: int,
-        n_cols_train: int
+        n_rows: int,
+        n_cols: int
     ) -> tuple[np.ndarray, np.ndarray]:
-        """Generates random indices for row and column sampling.
-        
-        This method implements the randomness needed to reduce overfitting
-        by selecting a subset of observations and features for the current
-        boosting iteration.
+        """Generates random row and column indices for stochastic boosting.
 
         Args:
-            n_rows_train (int): Total number of rows available in
-                the training set.
-            n_cols_train (int): Total number of columns available in
-                the training set.
+            n_rows (int): Total rows in training set.
+            n_cols (int): Total columns in training set.
 
         Returns:
-            tuple[np.ndarray, np.ndarray]: A tuple containing:
-                - subsample_idx (np.ndarray): Array of integer indices
-                    for row sampling.
-                - colsample_bytree_idx (np.ndarray): Array of integer indices
-                    for column sampling.
+            tuple[np.ndarray, np.ndarray]: Row and column indices.
         """
         subsample_idx = np.random.choice(
-            np.arange(n_rows_train),
-            size=int(self.subsample * n_rows_train),
+            np.arange(n_rows),
+            size=int(self.subsample * n_rows),
             replace=False
         )
 
         colsample_bytree_idx = np.random.choice(
-            np.arange(n_cols_train),
-            size=int(self.colsample_bytree * n_cols_train),
+            np.arange(n_cols),
+            size=int(self.colsample_bytree * n_cols),
             replace=False
         )
 
@@ -262,18 +237,12 @@ class GBRegressor:
     ) -> np.ndarray:
         """Computes the regularized Newton step for the current iteration.
 
-        Calculates the step using a diagonal Hessian approximation (second-order
-        derivative) with L2 regularization, matching the logic used in 
-        extreme gradient boosting.
-        
         Args:
-            y_train_sub (np.ndarray): Subsampled training target variable.
-            train_preds (np.ndarray): Subsampled rolling predictions on the
-                training feature variables.
-        
+            y_true (np.ndarray): Target values.
+            y_pred (np.ndarray): Current ensemble predictions.
+
         Returns:
-            np.ndarray: The regularized Newton update (-g / (h + lambda)), 
-                representing the optimal step for the current iteration.
+            np.ndarray: The regularized update step.
         """
         g = first_derivative_mean_squared_error(y_train_sub, train_preds_sub)
         h = second_derivative_mean_squared_error(y_train_sub, train_preds_sub)
@@ -281,20 +250,17 @@ class GBRegressor:
 
     def _fit_weak_learner(
         self,
-        X: pd.DataFrame,
-        y: pd.DataFrame
+        X: np.ndarray,
+        y: np.ndarray
     ) -> DecisionTreeRegressor | NNRegressor:
-        """Initializes and trains a weak learner.
-
-        This internal method handles the factory logic for selecting the weak
-        learner type and fitting it to the provided data.
+        """Instantiates and fits a weak learner based on the configured key.
 
         Args:
-            X (pd.DataFrame): The features for the current boosting iteration.
-            y (pd.DataFrame): The target (usually pseudo-residuals) to fit.
+            X (np.ndarray): Feature subset.
+            y (np.ndarray): Target pseudo-residuals.
 
         Returns:
-            DecisionTreeRegressor | NNRegressor: A trained weak learner
+            DecisionTreeRegressor | NNRegressor: A fitted weak learner
                 instance.
         """
         if self.weak_learner_key == "decision_tree":
@@ -317,17 +283,15 @@ class GBRegressor:
         valid_preds: np.ndarray,
         iter: int
     ) -> bool:
-        """Monitors validation loss and rolls back weak learners if
-        improvement stalls.
+        """Checks if validation performance has stalled to stop training.
 
         Args:
-            y_valid (np.ndarray): True validation targets.
-            valid_preds (np.ndarray): Current predictions for the validation
-                set.
-            iter (int): Current iteration index.
+            y_valid (np.ndarray): Ground truth validation targets.
+            valid_preds (np.ndarray): Current validation predictions.
+            iter_idx (int): The current boosting iteration.
 
         Returns:
-            bool: True if training should terminate, False otherwise.
+            bool: True if training should stop, False otherwise.
         """
         current_mse = mean_squared_error(y_valid, valid_preds)
         current_r2 = r2_score(y_valid, valid_preds)

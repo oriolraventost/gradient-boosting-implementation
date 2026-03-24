@@ -20,22 +20,24 @@ logging.basicConfig(
 )
 
 class Processor:
-    """Handles end-to-end data transformation for Train/Test sets.
-    
-    This class automates feature discovery by splitting columns into
-    categorical and numerical types, then applies a Scikit-Learn
-    ColumnTransformer pipeline to handle imputation and encoding.
+    """Orchestrates end-to-end data transformation for Train, Validation,
+    and Test sets.
+
+    This class automates feature discovery and transformation using
+    Scikit-Learn pipelines. It manages the transition from raw tabular or
+    image data to high-performance NumPy arrays, ensuring that scaling and
+    encoding parameters are derived strictly from the training set.
 
     Attributes:
-        target (str): Name of target column.
-        id_column (str): Name of ID column.
-        problem_type (str): Learning task (regression or classification).
-        cat_cols (list[str] | None): List of categorical feature names.
-        num_cols (list[str] | None): List of numerical feature names.
-        feature_transformer (ColumnTransformer | None): The Scikit-Learn
-            pipeline for transforming feature variables.
-        target_transformer (RobustScaler | LabelEncoder | None): The
-            Scikit-Learn object for transforming the target variable.
+        target (str): Name of the target variable column.
+        id_column (str): Name of the unique identifier column.
+        problem_type (str): The learning task.
+        cat_cols (list[str] | None): Names of categorical features.
+        num_cols (list[str] | None): Names of numerical features.
+        feature_transformer (ColumnTransformer | None): Fitted pipeline for
+            feature sets.
+        target_transformer (RobustScaler | OrdinalEncoder | None): Fitted
+            object for targets.
     """
 
     def __init__(
@@ -62,20 +64,21 @@ class Processor:
         full_train_data: pd.DataFrame,
         test_data: pd.DataFrame
     ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-        """Orchestrates fitting and transforming both sets.
-        
-        This method follows the "no data leakage" principle by fitting the 
-        transformer strictly on the training data and only transforming the
-        validation and test data.
+        """Fits transformers to training data and applies them to all
+        data splits.
+
+        This method strictly enforces the 'no data leakage' rule: parameters
+        like medians for imputation or scales for normalization are learned
+        only from the training split.
 
         Args:
-            full_train_data (pd.DataFrame): The raw full training dataset.
-            test_data (pd.DataFrame): The raw testing dataset.
+            full_train_data (pd.DataFrame): Raw combined
+                training/validation dataset.
+            test_data (pd.DataFrame): Raw test dataset.
 
         Returns:
-            tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]: A tuple
-                containing the processed training, validation and
-                testing DataFrames.
+            tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]: Processed
+                (Train, Valid, Test).
         """
         logger.info("Processing pipeline starting...")
 
@@ -116,20 +119,15 @@ class Processor:
         y_train: np.ndarray,
         y_valid: np.ndarray
     ) -> tuple[np.ndarray, np.ndarray]:
-        """ Fits the target transformer and transforms training and
-        validation targets.
-
-        Selects RobustScaler for regression or OrdinalEncoder for
-        classification. Handles the necessary 2D reshaping for the
-        transformers and flattens the output back to 1D arrays.
+        """Normalizes or encodes the target variable.
 
         Args:
-            y_train (np.ndarray): Training target values.
-            y_valid (np.ndarray): Validation target values.
+            y_train (np.ndarray): Raw training targets.
+            y_valid (np.ndarray): Raw validation targets.
 
         Returns:
-            tuple[np.ndarray, np.ndarray]: A tuple containing the
-                transformed arrays.
+            tuple[np.ndarray, np.ndarray]: Transformed (Train, Valid)
+                target arrays.
         """
         if self.problem_type == "regression":
             self.target_transformer = RobustScaler()
@@ -151,21 +149,18 @@ class Processor:
         self,
         data: pd.DataFrame | Subset
     ) -> tuple[np.ndarray, np.ndarray]:
-        """Splits input data into feature and target arrays.
+        """Extracts X and y, handling both Tabular and Computer Vision
+        formats.
 
-        Handles both computer vision datasets and tabular pandas DataFrames.
-        For image data, it performs normalization and adds a channel dimension
-        if necessary. For tabular data, it extracts the target column based on
-        the configured target attribute.
+        For images, this performs 0-1 normalization and converts to
+        (C, H, W) format. For tabular data, it separates the configured
+        target column.
 
         Args:
-            data (pd.DataFrame | Subset): The input data. If problem_type is 
-                computer_vision, this is expected to be a Torchvision 
-                Subset object. Otherwise, a pandas DataFrame.
+            data (pd.DataFrame | Subset): Input data container.
 
         Returns:
-            tuple[np.ndarray, np.ndarray]: A tuple containing the feature and
-                target arrays.
+            tuple[np.ndarray, np.ndarray]: Features (X) and Labels (y).
         """
         if self.problem_type == "computer_vision":
             X = data.dataset.data[data.indices]

@@ -16,10 +16,10 @@ class NNRegressor(nn.Module):
     """A PyTorch neural network regressor for tabular data.
 
     Attributes:
-        hidden_size (int): Number of units in each hidden layer.
-        batch_size (int): Batch size for parallel processing.
-        network (nn.Sequential): The core deep learning layers.
-        device (torch.device): The hardware where the model is loaded.
+        hidden_size (int): Number of units in the hidden layer.
+        batch_size (int): Batch size for training.
+        network (nn.Sequential): Sequential container of the MLP layers.
+        device (torch.device): Computing device used for model and data.
     """
 
     def __init__(
@@ -43,23 +43,22 @@ class NNRegressor(nn.Module):
         self.to(self.device)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Standard PyTorch forward pass.
+        """Runs the input through the feed-forward network.
 
         Args:
-            x (torch.Tensor): Tensor of features.
+            x (torch.Tensor): Input feature tensor.
 
         Returns:
-            torch.Tensor: Output values.
-        """        
+            torch.Tensor: Predicted continuous values.
+        """     
         return self.network(x)
 
     def fit(self, X: np.ndarray, y: np.ndarray) -> None:
-        """Trains the network using an Adam optimizer and OneCycleLR
-        scheduler. Includes gradient norm clipping.
+        """Trains the model using the provided NumPy datasets.
 
         Args:
-            X (np.ndarray): Features.
-            y (np.ndarray): Labels.
+            X (np.ndarray): Training features.
+            y (np.ndarray): Target regression values.
         """
         input_size = X.shape[1]
         output_size = y.shape[1] if len(y.shape) > 1 else 1
@@ -85,13 +84,13 @@ class NNRegressor(nn.Module):
             optimizer.step()
 
     def predict(self, X: np.ndarray) -> np.ndarray:
-        """Generates regression predictions for the given input data.
+        """Generates predictions for new input data.
 
         Args:
             X (np.ndarray): Input feature matrix.
 
         Returns:
-            np.ndarray: Flattened array of numerical predictions.
+            np.ndarray: Model predictions as a NumPy array.
         """
         X_t = torch.from_numpy(X).to(torch.float32)
         X_t = X_t.to(self.device)
@@ -103,14 +102,11 @@ class NNRegressor(nn.Module):
         return predictions.cpu().numpy()
 
     def _get_network(self, input_size: int, output_size: int) -> None:
-        """Defines the feed-forward neural network architecture.
-
-        Constructs a multi-layer perceptron (MLP) with two hidden layers, 
-        incorporating Batch Normalization and Dropout for regularization. 
+        """Constructs the Multi-Layer Perceptron architecture.
 
         Args:
-            input_size (int): The number of input features.
-            output_size (int): The dimension of the target.
+            input_size (int): Number of features in the input data.
+            output_size (int): Dimension of the regression target.
         """
         self.network = nn.Sequential(
             nn.Linear(input_size, self.hidden_size),
@@ -126,14 +122,14 @@ class NNRegressor(nn.Module):
         X: np.ndarray, 
         y: np.ndarray
     ) -> tuple[DataLoader, DataLoader]:
-        """Converts NumPy arrays into PyTorch DataLoader.
+        """Creates a PyTorch DataLoader from NumPy arrays.
 
         Args:
-            X (np.ndarray): Feature matrix of shape (n_samples, n_features).
-            y (np.ndarray): Target vector of shape (n_samples,).
+            X (np.ndarray): Feature matrix.
+            y (np.ndarray): Target labels.
 
         Returns:
-            DataLoader: Shuffled DataLoader for training.
+            DataLoader: Shuffled training data loader.
         """
         X_t = torch.from_numpy(X).to(torch.float32)
         y_t = torch.from_numpy(y).to(torch.float32)
