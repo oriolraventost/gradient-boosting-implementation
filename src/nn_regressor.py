@@ -16,6 +16,7 @@ class NNRegressor(nn.Module):
     """A PyTorch neural network regressor for tabular data.
 
     Attributes:
+        epochs (int): Number of epochs for neural network training.
         hidden_size (int): Number of units in the hidden layer.
         batch_size (int): Batch size for training.
         network (nn.Sequential): Sequential container of the MLP layers.
@@ -24,12 +25,14 @@ class NNRegressor(nn.Module):
 
     def __init__(
         self,
+        epochs: int,
         hidden_size: int,
         batch_size: int
     ):
         """Initializes the neural network regressor."""
         super().__init__()
         
+        self.epochs: int = epochs
         self.hidden_size: int = hidden_size
         self.batch_size: int = batch_size
         
@@ -71,17 +74,18 @@ class NNRegressor(nn.Module):
         optimizer = optim.Adam(self.parameters())
 
         self.train()
-        for batch_X, batch_y in loader:
-            batch_X = batch_X.to(self.device)
-            batch_y = batch_y.to(self.device)
+        for _ in self.epochs:
+            for batch_X, batch_y in loader:
+                batch_X = batch_X.to(self.device)
+                batch_y = batch_y.to(self.device)
 
-            optimizer.zero_grad()
-            
-            preds = self(batch_X)
-            loss = criterion(preds, batch_y.view_as(preds))
-            
-            loss.backward()
-            optimizer.step()
+                optimizer.zero_grad()
+                
+                preds = self(batch_X)
+                loss = criterion(preds, batch_y.view_as(preds))
+                
+                loss.backward()
+                optimizer.step()
 
     def predict(self, X: np.ndarray) -> np.ndarray:
         """Generates predictions for new input data.

@@ -16,6 +16,7 @@ class CNNRegressor(nn.Module):
     """A PyTorch convolutional neural network regressor.
 
     Attributes:
+        epochs (int): Number of epochs for neural network training.
         channels (int): Number of output channels for conv layers.
         kernel_size (int): Size of the square convolution kernel.
         pool_size (int): Size of the max pooling window.
@@ -27,6 +28,7 @@ class CNNRegressor(nn.Module):
 
     def __init__(
         self,
+        epochs: int,
         channels: int,
         kernel_size: int,
         pool_size: int,
@@ -36,6 +38,7 @@ class CNNRegressor(nn.Module):
         """Initializes the convolutional neural network regressor."""
         super().__init__()
         
+        self.epochs: int = epochs
         self.channels: int = channels
         self.kernel_size: int = kernel_size
         self.pool_size: int = pool_size
@@ -74,7 +77,8 @@ class CNNRegressor(nn.Module):
         
         image_size = X.shape[-1]
         conv1_out = (image_size - (self.kernel_size - 1)) / self.pool_size
-        linear_input = (conv1_out - self.kernel_size - 1) / self.pool_size
+        conv2_out = (conv1_out - (self.kernel_size - 1)) / self.pool_size
+        linear_input = self.channels * conv2_out ** 2
         
         self._get_network(in_channels, int(linear_input), output_size)
 
@@ -84,17 +88,18 @@ class CNNRegressor(nn.Module):
         optimizer = optim.Adam(self.parameters())
 
         self.train()
-        for batch_X, batch_y in loader:
-            batch_X = batch_X.to(self.device)
-            batch_y = batch_y.to(self.device)
+        for _ in range(self.epochs):
+            for batch_X, batch_y in loader:
+                batch_X = batch_X.to(self.device)
+                batch_y = batch_y.to(self.device)
 
-            optimizer.zero_grad()
-            
-            preds = self(batch_X)
-            loss = criterion(preds, batch_y.view_as(preds))
-            
-            loss.backward()
-            optimizer.step()
+                optimizer.zero_grad()
+                
+                preds = self(batch_X)
+                loss = criterion(preds, batch_y.view_as(preds))
+                
+                loss.backward()
+                optimizer.step()
 
     def predict(self, X: np.ndarray) -> np.ndarray:
         """Generates predictions for the input data.
