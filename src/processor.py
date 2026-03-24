@@ -203,6 +203,8 @@ class Processor:
             if not isinstance(data, np.ndarray):
                 data = data.numpy()
             
+            data = data.astype(np.float32) / 255.0
+            
             if data.ndim == 3:
                 data = np.expand_dims(data, -1)
             

@@ -43,7 +43,6 @@ def main():
         X_train, y_train = processor.split_features_target(train)
         X_valid, y_valid = processor.split_features_target(valid)
 
-        print(X_train.shape)
         y_train, y_valid = processor.transform_target(y_train, y_valid)
         
         if active_dataset_config["problem_type"] == "regression":
@@ -61,7 +60,7 @@ def main():
         model.fit(X_train, y_train, X_valid, y_valid)
 
         test = processor.convert_to_numpy(test)
-        print(test.shape)
+        
         data_manager.save_model(
             gradient_boosting_config,
             weak_learner_config,

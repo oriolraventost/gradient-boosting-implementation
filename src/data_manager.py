@@ -4,9 +4,10 @@ import json
 import yaml
 
 from pathlib import Path
+from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import RobustScaler, OrdinalEncoder
 from torchvision import datasets
-from torch.utils.data import Subset, random_split
+from torch.utils.data import Subset
 
 from src import *
 from src.gb_regressor import GBRegressor
@@ -153,7 +154,7 @@ class DataManager:
             tuple: Training Subset, Validation Subset, and Test Subset.
         """
         image_data_map = {
-            "MNIST": datasets.MNIST,
+            "mnist": datasets.MNIST,
             "cifar10": datasets.CIFAR10
         }
 
@@ -165,13 +166,17 @@ class DataManager:
             download=True
         )
 
-        train_size = int(0.8 * len(full_train_set))
-        valid_size = len(full_train_set) - train_size
-        
-        train_set, valid_set = random_split(
-           full_train_set, 
-            [train_size, valid_size]
+        targets = full_train_set.targets
+
+        train_idx, valid_idx = train_test_split(
+            range(len(targets)),
+            test_size=0.2,
+            stratify=targets,
+            random_state=42
         )
+
+        train_set = Subset(full_train_set, train_idx)
+        valid_set = Subset(full_train_set, valid_idx)
         
         test_set = image_data_class(
             root=f"{DATA_PATH}/{active_dataset}",
