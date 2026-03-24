@@ -17,7 +17,8 @@ class NNRegressor(nn.Module):
 
     Attributes:
         epochs (int): Number of epochs for neural network training.
-        hidden_size (int): Number of units in the hidden layer.
+        learning_rate (float): Learning rate of gradient descent.
+        hidden_size (list[int]): Number of units per hidden layer.
         batch_size (int): Batch size for training.
         network (nn.Sequential): Sequential container of the MLP layers.
         device (torch.device): Computing device used for model and data.
@@ -26,14 +27,16 @@ class NNRegressor(nn.Module):
     def __init__(
         self,
         epochs: int,
-        hidden_size: int,
+        learning_rate: float,
+        hidden_size: list[int],
         batch_size: int
     ):
         """Initializes the neural network regressor."""
         super().__init__()
         
         self.epochs: int = epochs
-        self.hidden_size: int = hidden_size
+        self.learning_rate: float = learning_rate
+        self.hidden_size: list[int] = hidden_size
         self.batch_size: int = batch_size
         
         self.network: nn.Sequential | None = None
@@ -71,7 +74,7 @@ class NNRegressor(nn.Module):
         loader = self._prepare_loader(X, y)
         
         criterion = nn.MSELoss()
-        optimizer = optim.Adam(self.parameters())
+        optimizer = optim.Adam(self.parameters(), self.learning_rate)
 
         self.train()
         for _ in self.epochs:
@@ -113,10 +116,13 @@ class NNRegressor(nn.Module):
             output_size (int): Dimension of the regression target.
         """
         self.network = nn.Sequential(
-            nn.Linear(input_size, self.hidden_size),
-            nn.GELU(),
+            nn.Linear(input_size, self.hidden_size[0]),
+            nn.ReLU(),
 
-            nn.Linear(self.hidden_size, output_size)
+            nn.Linear(self.hidden_size[0], self.hidden_size[1]),
+            nn.ReLU(),
+
+            nn.Linear(self.hidden_size[1], output_size)
         )
 
         self.network.to(self.device)

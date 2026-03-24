@@ -17,7 +17,8 @@ class CNNRegressor(nn.Module):
 
     Attributes:
         epochs (int): Number of epochs for neural network training.
-        channels (int): Number of output channels for conv layers.
+        learning_rate (float): Learning rate of gradient descent.
+        channels (list[int]): Number of output channels for conv layers.
         kernel_size (int): Size of the square convolution kernel.
         pool_size (int): Size of the max pooling window.
         hidden_size (int): Number of neurons in the fully connected layer.
@@ -29,7 +30,8 @@ class CNNRegressor(nn.Module):
     def __init__(
         self,
         epochs: int,
-        channels: int,
+        learning_rate: float,
+        channels: list[int],
         kernel_size: int,
         pool_size: int,
         hidden_size: int,
@@ -39,7 +41,8 @@ class CNNRegressor(nn.Module):
         super().__init__()
         
         self.epochs: int = epochs
-        self.channels: int = channels
+        self.learning_rate: float = learning_rate
+        self.channels: list[int] = channels
         self.kernel_size: int = kernel_size
         self.pool_size: int = pool_size
         self.hidden_size: int = hidden_size
@@ -77,15 +80,15 @@ class CNNRegressor(nn.Module):
         
         image_size = X.shape[-1]
         conv1_out = (image_size - (self.kernel_size - 1)) / self.pool_size
-        conv2_out = (conv1_out - (self.kernel_size - 1)) / self.pool_size
-        linear_input = self.channels * conv2_out ** 2
+        conv2_out = (conv1_out - (self.kernel_size - 1) ) / self.pool_size
+        linear_input = self.channels[1] * conv2_out ** 2
         
         self._get_network(in_channels, int(linear_input), output_size)
 
         loader = self._prepare_loader(X, y)
         
         criterion = nn.MSELoss()
-        optimizer = optim.Adam(self.parameters())
+        optimizer = optim.Adam(self.parameters(), self.learning_rate)
 
         self.train()
         for _ in range(self.epochs):
@@ -133,18 +136,18 @@ class CNNRegressor(nn.Module):
             output_size (int): Dimension of the target output.
         """
         self.network = nn.Sequential(
-            nn.Conv2d(in_channels, self.channels, self.kernel_size),
-            nn.GELU(),
+            nn.Conv2d(in_channels, self.channels[0], self.kernel_size),
+            nn.ReLU(),
             nn.MaxPool2d(self.pool_size),
 
-            nn.Conv2d(self.channels, self.channels, self.kernel_size),
-            nn.GELU(),
+            nn.Conv2d(self.channels[0], self.channels[1], self.kernel_size),
+            nn.ReLU(),
             nn.MaxPool2d(self.pool_size),
 
             nn.Flatten(),
             
             nn.Linear(linear_input, self.hidden_size),
-            nn.GELU(),
+            nn.ReLU(),
 
             nn.Linear(self.hidden_size, output_size)
         )

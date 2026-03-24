@@ -1,7 +1,7 @@
 main:
-  active_dataset: "cifar10"
-  run_preprocess: false
-  train_and_predict: true
+  active_dataset: "heart"
+  run_preprocess: true
+  train_and_predict: false
 
 gradient_boosting:
   weak_learner_key: "convolutional_neural_network"
@@ -16,13 +16,20 @@ decision_tree:
   max_depth: 5
 
 neural_network:
-  epochs: 3
-  hidden_size: 16
+  epochs: 20
+  learning_rate: 0.001
+  hidden_size:
+    - 16
+    - 8
   batch_size: 16
 
 convolutional_neural_network:
-  channels: 16
+  epochs: 20
+  learning_rate: 0.001
+  channels:
+    - 8
+    - 16
   kernel_size: 5
   pool_size: 2
-  hidden_size: 64
-  batch_size: 16
+  hidden_size: 16
+  batch_size: 32
