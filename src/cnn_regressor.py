@@ -79,11 +79,16 @@ class CNNRegressor(nn.Module):
         output_size = y.shape[1] if len(y.shape) > 1 else 1
         
         image_size = X.shape[-1]
-        conv1_out = (image_size - (self.kernel_size - 1)) / self.pool_size
-        conv2_out = (conv1_out - (self.kernel_size - 1) ) / self.pool_size
-        linear_input = self.channels[1] * conv2_out ** 2
+
+        conv1_out = image_size - self.kernel_size + 1
+        pool1_out = conv1_out // self.pool_size
+
+        conv2_out = pool1_out - self.kernel_size + 1
+        pool2_out = conv2_out // self.pool_size
+
+        linear_input = self.channels[1] * pool2_out * pool2_out
         
-        self._get_network(in_channels, int(linear_input), output_size)
+        self._get_network(in_channels, linear_input, output_size)
 
         loader = self._prepare_loader(X, y)
         
