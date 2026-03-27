@@ -1,0 +1,28 @@
+{
+    "run_metadata": {
+        "problem_type": "regression",
+        "best_iter": 34,
+        "best_mse": 0.105158,
+        "best_r2": 0.780639,
+        "start_timestamp": "2026_03_27_09_06",
+        "end_timestamp": "2026_03_27_09_23"
+    },
+    "gradient_boosting_config": {
+        "weak_learner_key": "neural_network",
+        "n_estimators": 1000,
+        "learning_rate": 0.3,
+        "subsample": 0.8,
+        "colsample_bytree": 0.8,
+        "reg_lambda": 1.0,
+        "early_stopping_rounds": 10
+    },
+    "weak_learner_config": {
+        "epochs": 30,
+        "learning_rate": 0.0001,
+        "hidden_size": [
+            16,
+            8
+        ],
+        "batch_size": 256
+    }
+}

@@ -77,7 +77,7 @@ class NNRegressor(nn.Module):
         optimizer = optim.Adam(self.parameters(), self.learning_rate)
 
         self.train()
-        for _ in self.epochs:
+        for _ in range(self.epochs):
             for batch_X, batch_y in loader:
                 batch_X = batch_X.to(self.device)
                 batch_y = batch_y.to(self.device)

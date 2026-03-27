@@ -1,0 +1,31 @@
+{
+    "run_metadata": {
+        "problem_type": "computer_vision",
+        "best_iter": 10,
+        "best_log_loss": 1.126457,
+        "best_accuracy": 0.6843,
+        "start_timestamp": "2026_03_27_08_56",
+        "end_timestamp": "2026_03_27_09_01"
+    },
+    "gradient_boosting_config": {
+        "weak_learner_key": "convolutional_neural_network",
+        "n_estimators": 10,
+        "learning_rate": 0.6,
+        "subsample": 1.0,
+        "colsample_bytree": 1.0,
+        "reg_lambda": 0.5,
+        "early_stopping_rounds": 3
+    },
+    "weak_learner_config": {
+        "epochs": 30,
+        "learning_rate": 0.001,
+        "channels": [
+            8,
+            16
+        ],
+        "kernel_size": 5,
+        "pool_size": 2,
+        "hidden_size": 32,
+        "batch_size": 256
+    }
+}
