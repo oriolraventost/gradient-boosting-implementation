@@ -17,6 +17,7 @@ class CNNRegressor(nn.Module):
 
     Attributes:
         epochs (int): Number of epochs for neural network training.
+        patience (int): Early stopping rounds.
         learning_rate (float): Learning rate of gradient descent.
         channels (list[int]): Number of output channels for conv layers.
         kernel_size (int): Size of the square convolution kernel.
@@ -30,17 +31,19 @@ class CNNRegressor(nn.Module):
     def __init__(
         self,
         epochs: int,
+        patience: int,
         learning_rate: float,
         channels: list[int],
         kernel_size: int,
         pool_size: int,
-        hidden_size: int,
+        hidden_size: float,
         batch_size: int
     ):
         """Initializes the convolutional neural network regressor."""
         super().__init__()
         
         self.epochs: int = epochs
+        self.patience: int = patience
         self.learning_rate: float = learning_rate
         self.channels: list[int] = channels
         self.kernel_size: int = kernel_size
@@ -68,36 +71,50 @@ class CNNRegressor(nn.Module):
         """      
         return self.network(x)
 
-    def fit(self, X: np.ndarray, y: np.ndarray) -> None:
+    def fit(
+        self,
+        X: np.ndarray,
+        y: np.ndarray,
+        X_valid: np.ndarray,
+        y_valid: np.ndarray
+    ) -> None:
         """Trains the model using the provided features and labels.
 
         Args:
             X (np.ndarray): Training features.
             y (np.ndarray): Target regression values.
+            X_valid (np.ndarray): Validation features.
+            y_valid (np.ndarray): Validation regression values.
         """
         in_channels = X.shape[1]
         output_size = y.shape[1] if len(y.shape) > 1 else 1
         
         image_size = X.shape[-1]
 
-        conv1_out = image_size - self.kernel_size + 1
+        conv1_out = image_size - (self.kernel_size - 1)
         pool1_out = conv1_out // self.pool_size
 
-        conv2_out = pool1_out - self.kernel_size + 1
+        conv2_out = pool1_out - (self.kernel_size - 1)
         pool2_out = conv2_out // self.pool_size
 
-        linear_input = self.channels[1] * pool2_out * pool2_out
+        conv3_out = pool2_out - (self.kernel_size - 1)
+        linear_input = self.channels[1] * conv3_out * conv3_out
         
         self._get_network(in_channels, linear_input, output_size)
 
-        loader = self._prepare_loader(X, y)
+        train_loader = self._prepare_loader(X, y)
+        valid_loader = self._prepare_loader(X_valid, y_valid)
         
         criterion = nn.MSELoss()
         optimizer = optim.Adam(self.parameters(), self.learning_rate)
 
-        self.train()
+        best_val_loss = float("inf")
+        patience_counter = 0
+        best_state = None
+
         for _ in range(self.epochs):
-            for batch_X, batch_y in loader:
+            self.train()
+            for batch_X, batch_y in train_loader:
                 batch_X = batch_X.to(self.device)
                 batch_y = batch_y.to(self.device)
 
@@ -108,6 +125,32 @@ class CNNRegressor(nn.Module):
                 
                 loss.backward()
                 optimizer.step()
+            
+            val_loss = 0.0
+            self.eval()
+            with torch.no_grad():
+                for val_X, val_y in valid_loader:
+                    val_X = val_X.to(self.device)
+                    val_y = val_y.to(self.device)
+
+                    preds = self(val_X)
+                    loss = criterion(preds, val_y.view_as(preds))
+
+                    val_loss += loss.item()
+
+            val_loss /= len(valid_loader)
+
+            if val_loss < best_val_loss:
+                best_val_loss = val_loss
+                patience_counter = 0
+                best_state = self.state_dict()
+            else:
+                patience_counter += 1
+                if patience_counter >= self.patience:
+                    break
+        
+        if best_state is not None:
+            self.load_state_dict(best_state)
 
     def predict(self, X: np.ndarray) -> np.ndarray:
         """Generates predictions for the input data.
@@ -149,8 +192,10 @@ class CNNRegressor(nn.Module):
             nn.ReLU(),
             nn.MaxPool2d(self.pool_size),
 
+            nn.Conv2d(self.channels[1], self.channels[1], self.kernel_size),
+            nn.ReLU(),
             nn.Flatten(),
-            
+
             nn.Linear(linear_input, self.hidden_size),
             nn.ReLU(),
 

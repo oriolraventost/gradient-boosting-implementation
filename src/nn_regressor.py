@@ -17,8 +17,9 @@ class NNRegressor(nn.Module):
 
     Attributes:
         epochs (int): Number of epochs for neural network training.
+        patience (int): Early stopping rounds.
         learning_rate (float): Learning rate of gradient descent.
-        hidden_size (list[int]): Number of units per hidden layer.
+        hidden_size (int): Number of units in hidden layer.
         batch_size (int): Batch size for training.
         network (nn.Sequential): Sequential container of the MLP layers.
         device (torch.device): Computing device used for model and data.
@@ -27,16 +28,18 @@ class NNRegressor(nn.Module):
     def __init__(
         self,
         epochs: int,
+        patience: int,
         learning_rate: float,
-        hidden_size: list[int],
+        hidden_size: int,
         batch_size: int
     ):
         """Initializes the neural network regressor."""
         super().__init__()
         
         self.epochs: int = epochs
+        self.patience: int = patience
         self.learning_rate: float = learning_rate
-        self.hidden_size: list[int] = hidden_size
+        self.hidden_size: int = hidden_size
         self.batch_size: int = batch_size
         
         self.network: nn.Sequential | None = None
@@ -59,26 +62,38 @@ class NNRegressor(nn.Module):
         """     
         return self.network(x)
 
-    def fit(self, X: np.ndarray, y: np.ndarray) -> None:
-        """Trains the model using the provided NumPy datasets.
+    def fit(
+        self,
+        X: np.ndarray,
+        y: np.ndarray,
+        X_valid: np.ndarray,
+        y_valid: np.ndarray
+    ) -> None:
+        """Trains the model using the provided features and labels.
 
         Args:
             X (np.ndarray): Training features.
             y (np.ndarray): Target regression values.
+            X_valid (np.ndarray): Validation features.
+            y_valid (np.ndarray): Validation regression values.
         """
         input_size = X.shape[1]
         output_size = y.shape[1] if len(y.shape) > 1 else 1
 
         self._get_network(input_size, output_size)
 
-        loader = self._prepare_loader(X, y)
+        train_loader = self._prepare_loader(X, y)
+        valid_loader = self._prepare_loader(X_valid, y_valid)
         
         criterion = nn.MSELoss()
         optimizer = optim.Adam(self.parameters(), self.learning_rate)
 
-        self.train()
+        best_val_loss = float("inf")
+        patience_counter = 0
+
         for _ in range(self.epochs):
-            for batch_X, batch_y in loader:
+            self.train()
+            for batch_X, batch_y in train_loader:
                 batch_X = batch_X.to(self.device)
                 batch_y = batch_y.to(self.device)
 
@@ -89,6 +104,29 @@ class NNRegressor(nn.Module):
                 
                 loss.backward()
                 optimizer.step()
+
+            val_loss = 0.0
+            self.eval()
+            with torch.no_grad():
+                for val_X, val_y in valid_loader:
+                    val_X = val_X.to(self.device)
+                    val_y = val_y.to(self.device)
+
+                    preds = self(val_X)
+                    loss = criterion(preds, val_y.view_as(preds))
+
+                    val_loss += loss.item()
+
+            val_loss /= len(valid_loader)
+
+            if val_loss < best_val_loss:
+                best_val_loss = val_loss
+                patience_counter = 0
+            
+            else:
+                patience_counter += 1
+                if patience_counter >= self.patience:
+                    break
 
     def predict(self, X: np.ndarray) -> np.ndarray:
         """Generates predictions for new input data.
@@ -116,13 +154,11 @@ class NNRegressor(nn.Module):
             output_size (int): Dimension of the regression target.
         """
         self.network = nn.Sequential(
-            nn.Linear(input_size, self.hidden_size[0]),
+            nn.Linear(input_size, self.hidden_size),
             nn.ReLU(),
+            nn.Dropout(0.3),
 
-            nn.Linear(self.hidden_size[0], self.hidden_size[1]),
-            nn.ReLU(),
-
-            nn.Linear(self.hidden_size[1], output_size)
+            nn.Linear(self.hidden_size, output_size)
         )
 
         self.network.to(self.device)

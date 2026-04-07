@@ -128,10 +128,14 @@ class GBClassifier:
                 n_rows_train,
                 n_cols_train
             )
+
+            oob_idx = np.setdiff1d(np.arange(n_rows_train), subsample_idx)
             
             weak_learner = self._fit_weak_learner(
                 X_train[subsample_idx][:, colsample_bytree_idx],
-                pseudo_residuals[subsample_idx]
+                pseudo_residuals[subsample_idx],
+                X_train[oob_idx][:, colsample_bytree_idx],
+                pseudo_residuals[oob_idx]
             )
             
             train_update = self.learning_rate * weak_learner.predict(
@@ -280,13 +284,17 @@ class GBClassifier:
     def _fit_weak_learner(
         self,
         X: np.ndarray,
-        y: np.ndarray
+        y: np.ndarray,
+        X_valid: np.ndarray,
+        y_valid: np.ndarray
     ) -> DecisionTreeRegressor | NNRegressor | CNNRegressor:
         """Instantiates and fits a weak learner for the current stage.
 
         Args:
-            X (np.ndarray): Feature subset.
-            y (np.ndarray): Pseudo-residuals.
+            X (np.ndarray): Training feature subset.
+            y (np.ndarray): Training pseudo-residuals.
+            X_valid (np.ndarray): Validation feature subset.
+            y_valid (np.ndarray): Validation pseudo-residuals.
 
         Returns:
             DecisionTreeRegressor | NNRegressor | CNNRegressor: A trained weak
@@ -294,19 +302,21 @@ class GBClassifier:
         """
         if self.weak_learner_key == "decision_tree":
             weak_learner = DecisionTreeRegressor(**self.weak_learner_config)
+            weak_learner.fit(X, y)
         
         elif self.weak_learner_key == "neural_network":
             weak_learner = NNRegressor(**self.weak_learner_config)
+            weak_learner.fit(X, y, X_valid, y_valid)
         
         elif self.weak_learner_key == "convolutional_neural_network":
             weak_learner = CNNRegressor(**self.weak_learner_config)
+            weak_learner.fit(X, y, X_valid, y_valid)
         
         else:
             raise ValueError(
                 f"Invalid weak learner key: {self.weak_learner_key}"
             )
 
-        weak_learner.fit(X, y)
         return weak_learner
 
     def _early_stopping_needed(

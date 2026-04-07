@@ -118,9 +118,13 @@ class GBRegressor:
                 n_cols_train
             )
             
+            oob_idx = np.setdiff1d(np.arange(n_rows_train), subsample_idx)
+            
             weak_learner = self._fit_weak_learner(
                 X_train[subsample_idx][:, colsample_bytree_idx],
-                pseudo_residuals[subsample_idx]
+                pseudo_residuals[subsample_idx],
+                X_train[oob_idx][:, colsample_bytree_idx],
+                pseudo_residuals[oob_idx]
             )
             
             train_update = self.learning_rate * weak_learner.predict(
