@@ -1,7 +1,7 @@
 main:
-  active_dataset: "heart"
-  run_preprocess: false
-  train_and_predict: true
+  active_dataset: "scores"
+  run_preprocess: true
+  train_and_predict: false
 
 gradient_boosting:
   weak_learner_key: "neural_network"

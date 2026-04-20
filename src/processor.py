@@ -84,8 +84,6 @@ class Processor:
 
         self._get_feature_transformer()
         
-        full_train_data = self._cut_data(full_train_data)
-
         train_data, valid_data = self._train_valid_split(
             full_train_data
         )
@@ -246,51 +244,6 @@ class Processor:
             ],
             verbose_feature_names_out=False
         ).set_output(transform="pandas")
-    
-    def _cut_data(
-        self,
-        data: pd.DataFrame,
-        max_rows: int = 100_000,
-        iqr_factor: float = 1.5
-    ) -> pd.DataFrame:
-        """Reduces the dataset size. If the dataset exceeds the limit,
-        it performs a stratified reduction for classification problems
-        to maintain class proportions. For regression, it performs a
-        simple random shuffle and cut, after removing mild target outliers.
-
-        Args:
-            data (pd.DataFrame): The input dataframe to be processed.
-            max_rows (int): Maximum number of rows of reduced data.
-            iqr_factor (float): Outlier removal IQR factor.
-
-        Returns:
-            pd.DataFrame: A subset of the input data.
-        """
-        if self.problem_type == "regression":
-            q1 = data[self.target].quantile(0.25)
-            q3 = data[self.target].quantile(0.75)
-            iqr = q3 - q1
-            lower = q1 - iqr_factor * iqr
-            upper = q3 + iqr_factor * iqr
-            data = data[(data[self.target] >= lower) & (data[self.target] <= upper)]
-
-        if len(data) <= max_rows:
-            return data
-        
-        stratify_col = (
-            data[self.target]
-            if self.problem_type == "classification"
-            else None
-        )
-
-        _, data_subset = train_test_split(
-            data,
-            test_size=max_rows,
-            stratify=stratify_col,
-            random_state=42
-        )
-        
-        return data_subset
 
     def _train_valid_split(
         self,
