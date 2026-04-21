@@ -296,7 +296,7 @@ class GBRegressor:
         current_mse = mean_squared_error(y_valid, valid_preds)
         current_r2 = r2_score(y_valid, valid_preds)
 
-        if not iter % 1:
+        if not iter % 10:
             logger.info(
                 f"Iteration: {iter} | "
                 f"Validation MSE: {current_mse:.6f} | "
