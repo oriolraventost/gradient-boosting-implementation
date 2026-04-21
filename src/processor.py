@@ -6,11 +6,10 @@ from torch.utils.data import Subset
 from sklearn.model_selection import train_test_split
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
-from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import (
     OrdinalEncoder,
     OneHotEncoder,
-    RobustScaler
+    MinMaxScaler
 )
 
 logger = logging.getLogger(__name__)
@@ -36,7 +35,7 @@ class Processor:
         num_cols (list[str] | None): Names of numerical features.
         feature_transformer (ColumnTransformer): Pipeline for transforming
             features.
-        target_transformer (RobustScaler | OrdinalEncoder): Pipeline for
+        target_transformer (MinMaxScaler | OrdinalEncoder): Pipeline for
             transforming targets.
     """
 
@@ -56,8 +55,13 @@ class Processor:
         self.cat_cols: list[str] | None = cat_cols
         self.num_cols: list[str] | None = num_cols
         
-        self.feature_transformer: ColumnTransformer = self._get_feature_transformer()
-        self.target_transformer: RobustScaler | OrdinalEncoder = self._get_target_transformer()
+        self.feature_transformer: ColumnTransformer = (
+            self._get_feature_transformer()
+        )
+
+        self.target_transformer: MinMaxScaler | OrdinalEncoder = (
+            self._get_target_transformer()
+        )
     
     def fit_transform(
         self,
@@ -186,9 +190,8 @@ class Processor:
     def _get_feature_transformer(self) -> ColumnTransformer:
         """Initializes the preprocessing pipeline for features.
 
-        Numeric features are imputed with the median and scaled using a 
-        RobustScaler. Categorical features are One-Hot Encoded for categories 
-        with >1% frequency. Outputs a pandas DataFrame.
+        Numeric features are scaled using a MinMaxScaler. Categorical
+        features are one-hot encoded. Outputs a pandas DataFrame.
 
         Returns:
             ColumnTransformer: A scikit-learn transformer configured for 
@@ -196,16 +199,13 @@ class Processor:
         """
         cat_pipeline = Pipeline([
             ('encode', OneHotEncoder(
-                drop="if_binary",
-                min_frequency=0.01,
                 handle_unknown='ignore',
                 sparse_output=False
             ))
         ])
 
         num_pipeline = Pipeline([
-            ('impute', SimpleImputer(strategy='median')),
-            ('scale', RobustScaler())
+            ('scale', MinMaxScaler())
         ])
 
         return ColumnTransformer(
@@ -216,18 +216,18 @@ class Processor:
             verbose_feature_names_out=False
         ).set_output(transform="pandas")
     
-    def _get_target_transformer(self) -> RobustScaler | OrdinalEncoder:
+    def _get_target_transformer(self) -> MinMaxScaler | OrdinalEncoder:
         """Selects the appropriate scaler or encoder for the target variable.
 
-        Uses a RobustScaler for regression tasks to handle outliers or an 
+        Uses a MinMax for regression tasks to handle outliers or an 
         OrdinalEncoder for classification tasks.
 
         Returns:
-            RobustScaler | OrdinalEncoder: The transformer corresponding 
+            MinMaxScaler | OrdinalEncoder: The transformer corresponding 
                 to the specified problem type.
         """
         if self.problem_type == "regression":
-            return RobustScaler()
+            return MinMaxScaler()
         
         else:
             return OrdinalEncoder()
