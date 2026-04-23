@@ -335,7 +335,7 @@ class GBClassifier:
         predicted_classes = np.argmax(valid_probabilities, axis=1)
         current_accuracy = accuracy_score(y_valid, predicted_classes)
 
-        if not iter % 1:
+        if not iter % 10:
             logger.info(
                 f"Iteration: {iter} | "
                 f"Validation Log Loss: {current_log_loss:.6f} | "

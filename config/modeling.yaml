@@ -1,5 +1,5 @@
 main:
-  active_dataset: "scores"
+  active_dataset: "heart"
   run_preprocess: true
   train_and_predict: false
 
