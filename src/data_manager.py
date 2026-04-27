@@ -160,41 +160,27 @@ class DataManager:
 
         image_data_class = image_data_map[active_dataset]
 
-        full_train_set = image_data_class(
+        train_set = image_data_class(
             root=f"{DATA_PATH}/{active_dataset}",
             train=True,
             download=True
         )
 
-        targets = full_train_set.targets
-
-        train_idx, valid_idx = train_test_split(
-            range(len(targets)),
-            test_size=0.2,
-            stratify=targets,
-            random_state=42
-        )
-
-        train_set = Subset(full_train_set, train_idx)
-        valid_set = Subset(full_train_set, valid_idx)
-        
         test_set = image_data_class(
             root=f"{DATA_PATH}/{active_dataset}",
             train=False,
             download=True
         )
 
-        test_set = Subset(
-            test_set, 
-            list(range(len(test_set)))
-        )
+        train_set = Subset(train_set, list(range(len(train_set))))
+        test_set = Subset(test_set, list(range(len(test_set))))
 
-        full_train_size = len(full_train_set)
+        full_train_size = len(train_set)
         test_size = len(test_set)
 
         self.test_index = range(full_train_size, full_train_size + test_size)
 
-        return train_set, valid_set, test_set
+        return train_set, test_set
 
     def save_model(
         self,

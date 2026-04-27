@@ -1,5 +1,5 @@
 main:
-  active_dataset: "heart"
+  active_dataset: "cifar10"
   run_preprocess: true
   train_and_predict: false
 

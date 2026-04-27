@@ -96,7 +96,8 @@ class CNNRegressor(nn.Module):
         optimizer = optim.Adam(self.parameters(), self.learning_rate)
 
         self.train()
-        for _ in range(self.epochs):
+        for epoch in range(self.epochs):
+            running_loss = 0.0
             for batch_X, batch_y in loader:
                 batch_X = batch_X.to(self.device)
                 batch_y = batch_y.to(self.device)
@@ -108,6 +109,11 @@ class CNNRegressor(nn.Module):
                 
                 loss.backward()
                 optimizer.step()
+
+                running_loss += loss.item() * batch_X.size(0)
+            
+            epoch_loss = running_loss / len(loader.dataset)
+            print(f"Epoch [{epoch+1}/{self.epochs}] - Training Loss: {epoch_loss:.4f}")
 
     def predict(self, X: np.ndarray) -> np.ndarray:
         """Generates predictions for the input data.
@@ -142,16 +148,19 @@ class CNNRegressor(nn.Module):
         """
         self.network = nn.Sequential(
             nn.Conv2d(in_channels, self.channels[0], self.kernel_size),
+            # nn.BatchNorm2d(self.channels[0]),
             nn.ReLU(),
             nn.MaxPool2d(self.pool_size),
 
             nn.Conv2d(self.channels[0], self.channels[1], self.kernel_size),
+            # nn.BatchNorm2d(self.channels[1]),
             nn.ReLU(),
             nn.MaxPool2d(self.pool_size),
 
             nn.Flatten(),
             
             nn.Linear(linear_input, self.hidden_size),
+            # nn.BatchNorm1d(self.hidden_size),
             nn.ReLU(),
 
             nn.Linear(self.hidden_size, output_size)
