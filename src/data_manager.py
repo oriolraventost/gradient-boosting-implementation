@@ -78,24 +78,14 @@ class DataManager:
 
         return datasets_config, modeling_config
     
-    def load_raw_data(self) -> tuple[pd.DataFrame, pd.DataFrame]:
-        """Loads the initial training and test CSV files.
+    def load_raw_data(self) -> pd.DataFrame:
+        """Loads the initial CSV file.
 
         Returns:
-            tuple[pd.DataFrame, pd.DataFrame]: Training and test DataFrames.
+            pd.DataFrame: Raw dataset.
         """
-        train_path = self.raw_dir / "train.csv"
-        test_path = self.raw_dir / "test.csv"
-
-        train = pd.read_csv(train_path, index_col=self.id_column)
-        test = pd.read_csv(test_path, index_col=self.id_column)
-
-        train_size = len(train)
-        test_size = len(test)
-
-        self.test_index = range(train_size, train_size + test_size)
-        
-        return train, test
+        dataset_path = self.raw_dir / "data.csv"
+        return pd.read_csv(dataset_path, index_col=self.id_column)
     
     def save_processed_data(
         self,

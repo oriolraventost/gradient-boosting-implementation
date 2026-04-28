@@ -6,7 +6,6 @@ from torch.utils.data import Subset
 from sklearn.model_selection import train_test_split
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
-from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import (
     OrdinalEncoder,
     OneHotEncoder,
@@ -61,8 +60,7 @@ class Processor:
     
     def transform_features(
         self,
-        full_train_data: pd.DataFrame,
-        test_data: pd.DataFrame
+        raw_data: pd.DataFrame
     ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
         """Fits transformers to training data and applies them to all
         data splits.
@@ -72,9 +70,7 @@ class Processor:
         only from the training split.
 
         Args:
-            full_train_data (pd.DataFrame): Raw combined
-                training/validation dataset.
-            test_data (pd.DataFrame): Raw test dataset.
+            raw_data (pd.DataFrame): Raw dataset.
 
         Returns:
             tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]: Processed
@@ -84,10 +80,19 @@ class Processor:
 
         self._get_feature_transformer()
         
-        full_train_data = self._cut_data(full_train_data)
+        raw_data = self._cut_data(raw_data)
 
-        train_data, valid_data = self._train_valid_split(
-            full_train_data
+        n = raw_data.shape[0]
+        test_size = int(n * 0.2)
+
+        non_test_data, test_data = self._train_test_split(
+            raw_data,
+            test_size
+        )
+        
+        train_data, valid_data = self._train_test_split(
+            non_test_data,
+            test_size
         )
         
         logger.info("Fitting and transforming training data...")
@@ -105,6 +110,7 @@ class Processor:
         logger.info("Transforming test data...")
         processed_test_data = self.feature_transformer.transform(test_data)
         processed_test_data.index = test_data.index
+        processed_test_data[self.target] = test_data[self.target]
 
         self._drop_duplicate_and_constant(
             processed_train_data,
@@ -117,17 +123,19 @@ class Processor:
     def transform_target(
         self,
         y_train: np.ndarray,
-        y_valid: np.ndarray
+        y_valid: np.ndarray,
+        y_test: np.ndarray
     ) -> tuple[np.ndarray, np.ndarray]:
         """Normalizes or encodes the target variable.
 
         Args:
             y_train (np.ndarray): Raw training targets.
             y_valid (np.ndarray): Raw validation targets.
+            y_test (np.ndarray): Raw test targets.
 
         Returns:
-            tuple[np.ndarray, np.ndarray]: Transformed (Train, Valid)
-                target arrays.
+            tuple[np.ndarray, np.ndarray, np.ndarray]: Transformed
+                (Train, Valid, Test) target arrays.
         """
         if self.problem_type == "regression":
             self.target_transformer = RobustScaler()
@@ -143,7 +151,11 @@ class Processor:
             y_valid.reshape(-1, 1)
         ).ravel()
 
-        return processed_y_train, processed_y_valid
+        processed_y_test = self.target_transformer.transform(
+            y_test.reshape(-1, 1)
+        ).ravel()
+
+        return processed_y_train, processed_y_valid, processed_y_test
 
     def split_features_target(
         self,
@@ -220,22 +232,17 @@ class Processor:
         categorical attributes.
 
         The transformation logic follows a two-pronged strategy. On
-        numerical features, imputes missing values using the median
-        and applies robust scaling. On categorical features, performs
-        One-Hot Encoding restricted to categories with frequency higher
-        than 1%.
+        numerical features, applies robust scaling. On categorical
+        features, performs One-Hot Encoding.
         """
         cat_pipeline = Pipeline([
             ('encode', OneHotEncoder(
-                drop="if_binary",
-                min_frequency=0.01,
                 handle_unknown='ignore',
                 sparse_output=False
             ))
         ])
 
         num_pipeline = Pipeline([
-            ('impute', SimpleImputer(strategy='median')),
             ('scale', RobustScaler())
         ])
 
@@ -250,7 +257,7 @@ class Processor:
     def _cut_data(
         self,
         data: pd.DataFrame,
-        max_rows: int = 100_000,
+        max_rows: int = 200_000,
         iqr_factor: float = 1.5
     ) -> pd.DataFrame:
         """Reduces the dataset size. If the dataset exceeds the limit,
@@ -292,23 +299,24 @@ class Processor:
         
         return data_subset
 
-    def _train_valid_split(
+    def _train_test_split(
         self,
-        data: pd.DataFrame
+        data: pd.DataFrame,
+        test_size: int
     ) -> tuple[pd.DataFrame, pd.DataFrame]:
-        """Splits the dataset into training and validation sets.
+        """Splits the dataset into training and test sets.
 
         Performs a stratified split if the problem type is classification to
         ensure class proportions are maintained across folds. Otherwise, 
         performs a standard split.
 
         Args:
-            data (pd.DataFrame): The complete processed dataset containing 
+            data (pd.DataFrame): The complete dataset containing 
                 both features and the target column.
+            test_size (int): Desired size of test dataset.
 
         Returns:
-            tuple[pd.DataFrame, pd.DataFrame]: A tuple containing the 
-                split at a 80/20 ratio.
+            tuple[pd.DataFrame, pd.DataFrame]: A tuple containing the split.
         """
         stratify_col = (
             data[self.target] if self.problem_type == "classification"
@@ -318,7 +326,7 @@ class Processor:
         return train_test_split(
             data, 
             stratify=stratify_col,
-            test_size=0.2,
+            test_size=test_size,
             random_state=42
         )
 

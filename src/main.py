@@ -31,9 +31,9 @@ def main():
     
     else:
         if modeling_config["main"]["run_preprocess"]:  
-            raw_train, raw_test = data_manager.load_raw_data()
+            raw_data = data_manager.load_raw_data()
             
-            train, valid, test = processor.transform_features(raw_train, raw_test)
+            train, valid, test = processor.transform_features(raw_data)
             data_manager.save_processed_data(train, valid, test)
         
         else:
@@ -42,8 +42,13 @@ def main():
     if modeling_config["main"]["train_and_predict"]:        
         X_train, y_train = processor.split_features_target(train)
         X_valid, y_valid = processor.split_features_target(valid)
+        X_test, y_test = processor.split_features_target(test)
 
-        y_train, y_valid = processor.transform_target(y_train, y_valid)
+        y_train, y_valid, y_test = processor.transform_target(
+            y_train,
+            y_valid,
+            y_test
+        )
         
         if active_dataset_config["problem_type"] == "regression":
             model = GBRegressor(
@@ -64,7 +69,7 @@ def main():
         data_manager.save_model(
             gradient_boosting_config,
             weak_learner_config,
-            test,
+            X_test,
             model,
             processor.target_transformer
         )
