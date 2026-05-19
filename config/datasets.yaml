@@ -1,7 +1,12 @@
+# ==============================================================================
+# DATASETS SETTINGS
+# ==============================================================================
+
 heart:
-  id_column: "id"
-  target: "Heart Disease"
-  cat_cols:
+  id_column: "id"                     # Unique ID for each row
+  target: "Heart Disease"             # Target column name
+  problem_type: "classification"      # Classification task
+  cat_cols:                           # Categorical feature column names
     - "Sex"
     - "Chest pain type"
     - "FBS over 120"
@@ -10,18 +15,18 @@ heart:
     - "Slope of ST"
     - "Number of vessels fluro"
     - "Thallium"
-  num_cols:
+  num_cols:                           # Continuous feature column names
     - "Age"
     - "BP"
     - "Cholesterol"
     - "Max HR"
     - "ST depression"
-  problem_type: "classification"
 
 scores:
-  id_column: "id"
-  target: "exam_score"
-  cat_cols:
+  id_column: "id"                     # Unique ID for each row
+  target: "exam_score"                # Target column name
+  problem_type: "regression"          # Regression task
+  cat_cols:                           # Categorical feature column names
     - "gender"
     - "course"
     - "internet_access"
@@ -29,19 +34,18 @@ scores:
     - "study_method"
     - "facility_rating"
     - "exam_difficulty"
-  num_cols:
+  num_cols:                           # Continuous feature column names
     - "age"
     - "study_hours"
     - "class_attendance"
     - "sleep_hours"
-  problem_type: "regression"
 
 mnist:
-  id_column: "id"
-  target: "Label"
-  problem_type: "computer_vision"
+  id_column: "id"                     # Unique ID for each image
+  target: "Label"                     # Target column name
+  problem_type: "computer_vision"     # Computer vision task
 
 cifar10:
-  id_column: "id"
-  target: "label"
-  problem_type: "computer_vision"
+  id_column: "id"                     # Unique ID for each image
+  target: "label"                     # Target column name
+  problem_type: "computer_vision"     # Computer vision task
