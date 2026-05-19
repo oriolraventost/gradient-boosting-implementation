@@ -37,8 +37,15 @@ class DataManager:
 
         self.test_index: range | None = None
 
-    def load_config(self) -> tuple[dict, dict]:
+    def load_config(
+        self,
+        active_dataset: str | None = None
+    ) -> tuple[dict, dict]:
         """Loads configuration files and instantiates directories.
+
+        Args:
+            active_dataset (str | None): Optional name of the dataset to
+                override the configuration default setting.
 
         Returns:
             tuple[dict, dict]: Dataset and modeling configurations.
@@ -49,7 +56,8 @@ class DataManager:
         with open(MODELING_CONFIG_PATH, "r") as f:
             modeling_config = yaml.safe_load(f)
         
-        active_dataset = modeling_config["main"]["active_dataset"]
+        if not active_dataset:
+            active_dataset = modeling_config["main"]["active_dataset"]
 
         self.id_column = datasets_config[active_dataset]["id_column"]
         self.target = datasets_config[active_dataset]["target"]
@@ -58,7 +66,9 @@ class DataManager:
         if self.problem_type != "computer_vision":
             self.raw_dir = Path(DATA_PATH) / active_dataset / "raw"
             
-            self.processed_dir = Path(DATA_PATH) / active_dataset / "processed"
+            self.processed_dir = (
+                Path(DATA_PATH) / active_dataset / "processed"
+            )
             self.processed_dir.mkdir(parents=True, exist_ok=True)
         
         self.model_dir = Path(MODELS_PATH) / active_dataset
