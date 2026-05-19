@@ -1,30 +1,23 @@
 import numpy as np
-import logging
 import torch
 import torch.nn as nn
 import torch.optim as optim
 
 from torch.utils.data import DataLoader, TensorDataset
 
-logger = logging.getLogger(__name__)
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
-
 class CNNRegressor(nn.Module):
     """A PyTorch convolutional neural network regressor.
 
     Attributes:
-        epochs (int): Number of epochs for neural network training.
-        learning_rate (float): Learning rate of gradient descent.
-        channels (list[int]): Number of output channels for conv layers.
-        kernel_size (int): Size of the square convolution kernel.
-        pool_size (int): Size of the max pooling window.
-        hidden_size (int): Number of neurons in the fully connected layer.
-        batch_size (int): Size of training batches.
-        network (nn.Sequential): The sequential container of model layers.
-        device (torch.device): Hardware device (CPU/CUDA) used for tensors.
+        epochs (int): Number of training epochs.
+        learning_rate (float): Optimizer learning rate.
+        channels (list[int]): Output channels for consecutive conv layers.
+        kernel_size (int): Side length of the square convolution kernel.
+        pool_size (int): Side length of the max pooling window.
+        hidden_size (int): Number of features in the first linear layer.
+        batch_size (int): Size of training mini-batches.
+        network (nn.Sequential | None): Model layers; built during fit.
+        device (torch.device): Computing device assigned to tensors.
     """
 
     def __init__(
@@ -37,7 +30,7 @@ class CNNRegressor(nn.Module):
         hidden_size: int,
         batch_size: int
     ):
-        """Initializes the convolutional neural network regressor."""
+        """Initializes hyperparameter attributes and sets the device."""
         super().__init__()
         
         self.epochs: int = epochs
@@ -58,21 +51,24 @@ class CNNRegressor(nn.Module):
         self.to(self.device)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Performs the forward pass of the model.
+        """Performs the forward pass.
 
         Args:
             x (torch.Tensor): Input tensor of shape (N, C, H, W).
 
         Returns:
-            torch.Tensor: Regression predictions.
+            torch.Tensor: Model predictions.
         """      
+        if self.network is None:
+            raise RuntimeError("Model must be fitted before forward pass.")
+        
         return self.network(x)
 
     def fit(self, X: np.ndarray, y: np.ndarray) -> None:
-        """Trains the model using the provided features and labels.
+        """Constructs the network architecture and trains the model.
 
         Args:
-            X (np.ndarray): Training features.
+            X (np.ndarray): Training features of shape (N, C, H, W).
             y (np.ndarray): Target regression values.
         """
         in_channels = X.shape[1]
@@ -113,13 +109,12 @@ class CNNRegressor(nn.Module):
         """Generates predictions for the input data.
 
         Args:
-            X (np.ndarray): Input feature matrix.
+            X (np.ndarray): Evaluation features of shape (N, C, H, W).
 
         Returns:
-            np.ndarray: Numerical predictions as a NumPy array.
+            np.ndarray: Model regression outputs.
         """
-        X_t = torch.from_numpy(X).to(torch.float32)
-        X_t = X_t.to(self.device)
+        X_t = torch.from_numpy(X).to(torch.float32).to(self.device)
 
         self.eval()
         with torch.no_grad():
@@ -133,12 +128,12 @@ class CNNRegressor(nn.Module):
         linear_input: int,
         output_size: int
     ) -> None:
-        """Builds the nn.Sequential network architecture.
+        """Instantiates and assigns the internal nn.Sequential architecture.
 
         Args:
-            in_channels (int): Number of input image channels.
-            linear_input (int): Flattened size after conv/pool layers.
-            output_size (int): Dimension of the target output.
+            in_channels (int): Input image channel count.
+            linear_input (int): Flattened feature size after conv blocks.
+            output_size (int): Target regression dimension.
         """
         self.network = nn.Sequential(
             nn.Conv2d(in_channels, self.channels[0], self.kernel_size),
@@ -163,15 +158,15 @@ class CNNRegressor(nn.Module):
         self, 
         X: np.ndarray, 
         y: np.ndarray
-    ) -> tuple[DataLoader, DataLoader]:
-        """Wraps NumPy arrays into a shuffled PyTorch DataLoader.
+    ) -> DataLoader:
+        """Wraps NumPy datasets into a PyTorch DataLoader.
 
         Args:
             X (np.ndarray): Input features.
             y (np.ndarray): Target labels.
 
         Returns:
-            DataLoader: Prepared training data loader.
+            DataLoader: Batched and shuffled data loader.
         """
         X_t = torch.from_numpy(X).to(torch.float32)
         y_t = torch.from_numpy(y).to(torch.float32)

@@ -23,32 +23,27 @@ logging.basicConfig(
 class GBClassifier:
     """Gradient boosting classifier with subsampling and early stopping.
 
-        This model implements a stage-wise additive ensemble that minimizes 
-        Cross-Entropy loss by fitting weak learners to the regularized Newton 
-        step of the log-loss function.
+    This model implements a stage-wise additive ensemble minimizing
+    Cross-Entropy loss by fitting weak learners to the regularized Newton 
+    step of the log-loss function.
 
-        Attributes:
-            n_estimators (int): Maximum number of boosting stages.
-            learning_rate (float): Step size shrinkage used in each update.
-            subsample (float): Fraction of samples used for each weak learner.
-            colsample_bytree (float): Fraction of features used for each
-                learner.
-            reg_lambda (float): L2 regularization term for the Newton step.
-            early_stopping_rounds (int): Iterations allowed without Log Loss
-                improvement.
-            weak_learner_key (str): Learner type.
-            weak_learner_config (dict): Hyperparameters for the weak learners.
-            initial_constant (np.ndarray): Initial class logits.
-            weak_learners (list): Fitted learners and their feature indices.
-            best_log_loss (float): Minimum recorded Log Loss on
-                validation set.
-            best_accuracy (float): Accuracy corresponding to the
-                best_log_loss.
-            best_iter (int): Iteration index that achieved
-                best_log_loss.
-            start_timestamp (str): Formatted start time of the fit process.
-            end_timestamp (str): Formatted end time of the fit process.
-        """
+    Attributes:
+        n_estimators (int): Maximum number of boosting stages.
+        learning_rate (float): Step size shrinkage used in updates.
+        subsample (float): Sample fraction used for each weak learner.
+        colsample_bytree (float): Feature fraction used for each learner.
+        reg_lambda (float): L2 regularization term for the Newton step.
+        early_stopping_rounds (int): Limit without validation improvement.
+        weak_learner_key (str): Chosen base learner identifier type.
+        weak_learner_config (dict): Core hyperparameters for weak learners.
+        initial_constant (np.ndarray | None): Center-log baseline logits.
+        weak_learners (list | None): Tuple sequence of fitted models and columns.
+        best_log_loss (float | None): Minimum recorded validation Log Loss.
+        best_accuracy (float | None): Accuracy at the best Log Loss index.
+        best_iter (int | None): Boosting iteration of the optimal model.
+        start_timestamp (str | None): Formatted start time of fit execution.
+        end_timestamp (str | None): Formatted termination time of fit execution.
+    """
 
     def __init__(
         self,
@@ -61,7 +56,7 @@ class GBClassifier:
         weak_learner_key: str,
         weak_learner_config: dict
     ):
-        """Initializes the gradient boosting classifier."""
+        """Initializes ensemble hyperparameters and dynamic tracking states."""
         self.n_estimators: int = n_estimators
         self.learning_rate: float = learning_rate
         self.subsample: float = subsample
@@ -72,8 +67,10 @@ class GBClassifier:
         self.weak_learner_key: str = weak_learner_key
         self.weak_learner_config = weak_learner_config
         
-        self.initial_constant: float | None = None
-        self.weak_learners: list[tuple[DecisionTreeRegressor, list]] = []
+        self.initial_constant: np.ndarray | None = None
+        self.weak_learners: list[
+            tuple[DecisionTreeRegressor | NNRegressor | CNNRegressor, list]
+        ] | None = None
         
         self.best_log_loss: float | None = None
         self.best_accuracy: float | None = None
@@ -93,9 +90,9 @@ class GBClassifier:
 
         Args:
             X_train (np.ndarray): Training features.
-            y_train (np.ndarray): Training labels.
-            X_valid (np.ndarray): Validation features.
-            y_valid (np.ndarray): Validation labels.
+            y_train (np.ndarray): Training categorical targets.
+            X_valid (np.ndarray): Validation evaluation features.
+            y_valid (np.ndarray): Validation categorical targets.
         """
         start_time = datetime.now()
         self.start_timestamp = start_time.strftime("%Y_%m_%d_%H_%M")
@@ -107,6 +104,7 @@ class GBClassifier:
         n_rows_train, n_cols_train, *extra = X_train.shape
         
         self.initial_constant = self._compute_initial_constant(y_train)
+        self.weak_learners = []
         
         train_preds = np.full(
             (len(y_train), len(self.initial_constant)),
@@ -155,25 +153,25 @@ class GBClassifier:
         self.end_timestamp = end_time.strftime("%Y_%m_%d_%H_%M")
     
     def predict(self, X: np.ndarray) -> np.ndarray:
-        """Predicts the class label for each sample.
+        """Predicts the optimal target class label for each input sample.
 
         Args:
             X (np.ndarray): Input feature matrix.
 
         Returns:
-            np.ndarray: Array of predicted class indices.
+            np.ndarray: Vector of predicted integer class boundaries.
         """
         proba_preds = self.predict_proba(X)
         return np.argmax(proba_preds, axis=1)
     
     def predict_proba(self, X: np.ndarray) -> np.ndarray:
-        """Predicts class probabilities using the softmax of ensemble logits.
+        """Predicts probability distributions via the ensemble softmax logits.
 
         Args:
             X (np.ndarray): Input feature matrix.
 
         Returns:
-            np.ndarray: Softmax probabilities of shape (n_samples, n_classes).
+            np.ndarray: Probabilities map of shape (n_samples, n_classes).
         """
         proba_preds = np.full(
             (len(X), len(self.initial_constant)),
@@ -190,10 +188,10 @@ class GBClassifier:
         return softmax(proba_preds)
 
     def save_model(self, file_path: str) -> None:
-        """Saves the ensemble state to a joblib file.
+        """Saves core ensemble target definitions to a static joblib file.
 
         Args:
-            file_path (str): Path to save the model artifact.
+            file_path (str): Local filesystem route to write binary object.
         """
         model_data = {
             "initial_constant": self.initial_constant,
@@ -205,10 +203,10 @@ class GBClassifier:
         logger.info(f"Model saved to {file_path}")
 
     def load_model(self, file_path: str) -> None:
-        """Loads a model state from a joblib file.
+        """Restores explicit ensemble weights from a verified joblib source.
 
         Args:
-            file_path (str): Path to the saved model file.
+            file_path (str): Target filesystem route holding saved weights.
         """
         model_data = joblib.load(file_path)
         logger.info(f"Model loaded from {file_path}")
@@ -218,13 +216,13 @@ class GBClassifier:
         self.weak_learners = model_data["weak_learners"]
     
     def _compute_initial_constant(self, y_train: np.ndarray) -> np.ndarray:
-        """Calculates centered log-proportions as the baseline logits.
+        """Calculates centered log-proportions as initial model baseline.
         
         Args:
-            y_train (np.ndarray): Training target labels.
+            y_train (np.ndarray): Unprocessed training array label keys.
         
         Returns:
-            np.ndarray: Initial logit vector.
+            np.ndarray: Initial target baseline logit row array vector.
         """
         _, counts = np.unique(y_train, return_counts=True)
         proportions = counts / len(y_train)
@@ -236,14 +234,14 @@ class GBClassifier:
         n_rows: int,
         n_cols: int
     ) -> tuple[np.ndarray, np.ndarray]:
-        """Generates random indices for stochastic row and feature sampling.
+        """Generates matrix positions for stochastic row and feature splits.
 
         Args:
-            n_rows (int): Total training samples.
-            n_cols (int): Total training features.
+            n_rows (int): Aggregate height count dimensions from source data.
+            n_cols (int): Aggregate width feature dimensions from source data.
 
         Returns:
-            tuple[np.ndarray, np.ndarray]: Sample and feature indices.
+            tuple[np.ndarray, np.ndarray]: Discrete sampled location indexes.
         """
         subsample_idx = np.random.choice(
             np.arange(n_rows),
@@ -267,11 +265,11 @@ class GBClassifier:
         """Computes the regularized Newton step for multiclass log-loss.
 
         Args:
-            y_true (np.ndarray): Training labels.
-            logits (np.ndarray): Current ensemble logits.
+            y_train_sub (np.ndarray): Subset targets matching batch scope.
+            train_preds_sub (np.ndarray): Current raw tracking batch logits.
 
         Returns:
-            np.ndarray: The regularized Newton update step.
+            np.ndarray: Numerical matrices defining specific negative updates.
         """
         g = first_derivative_log_loss(y_train_sub, train_preds_sub)
         h = second_derivative_log_loss(y_train_sub, train_preds_sub)
@@ -282,15 +280,14 @@ class GBClassifier:
         X: np.ndarray,
         y: np.ndarray
     ) -> DecisionTreeRegressor | NNRegressor | CNNRegressor:
-        """Instantiates and fits a weak learner for the current stage.
+        """Instantiates and fits a single stage estimator targeting updates.
 
         Args:
-            X (np.ndarray): Feature subset.
-            y (np.ndarray): Pseudo-residuals.
+            X (np.ndarray): Feature snapshot dimensions.
+            y (np.ndarray): Computed directional residuals metrics target.
 
         Returns:
-            DecisionTreeRegressor | NNRegressor | CNNRegressor: A trained weak
-                learner instance.
+            DecisionTreeRegressor | NNRegressor | CNNRegressor: Fitted learner.
         """
         if self.weak_learner_key == "decision_tree":
             weak_learner = DecisionTreeRegressor(**self.weak_learner_config)
@@ -315,15 +312,15 @@ class GBClassifier:
         valid_preds: np.ndarray,
         iter: int
     ) -> bool:
-        """Evaluates validation loss to determine if training should stop.
+        """Evaluates convergence trends against validation history targets.
 
         Args:
-            y_valid (np.ndarray): Ground truth validation labels.
-            valid_preds (np.ndarray): Current validation logits.
-            idx (int): Current iteration index.
+            y_valid (np.ndarray): Multi-class validation ground truth entries.
+            valid_preds (np.ndarray): Cumulative model predictive evaluations.
+            iter (int): Current absolute indexing step position.
 
         Returns:
-            bool: True if improvement has stalled, False otherwise.
+            bool: True if improvement stalls over threshold limits else False.
         """
         valid_probabilities = softmax(valid_preds)
         current_log_loss = log_loss(
@@ -335,12 +332,11 @@ class GBClassifier:
         predicted_classes = np.argmax(valid_probabilities, axis=1)
         current_accuracy = accuracy_score(y_valid, predicted_classes)
 
-        if not iter % 1:
-            logger.info(
-                f"Iteration: {iter} | "
-                f"Validation Log Loss: {current_log_loss:.6f} | "
-                f"Validation Accuracy: {current_accuracy:.6f}"
-            )
+        logger.info(
+            f"Iteration: {iter} | "
+            f"Validation Log Loss: {current_log_loss:.6f} | "
+            f"Validation Accuracy: {current_accuracy:.6f}"
+        )
 
         if current_log_loss < self.best_log_loss:
             self.best_log_loss = current_log_loss

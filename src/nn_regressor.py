@@ -1,16 +1,9 @@
 import numpy as np
-import logging
 import torch
 import torch.nn as nn
 import torch.optim as optim
 
 from torch.utils.data import DataLoader, TensorDataset
-
-logger = logging.getLogger(__name__)
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
 
 class NNRegressor(nn.Module):
     """A PyTorch neural network regressor for tabular data.
@@ -20,7 +13,7 @@ class NNRegressor(nn.Module):
         learning_rate (float): Learning rate of gradient descent.
         hidden_size (list[int]): Number of units per hidden layer.
         batch_size (int): Batch size for training.
-        network (nn.Sequential): Sequential container of the MLP layers.
+        network (nn.Sequential | None): Sequential container of the MLP layers.
         device (torch.device): Computing device used for model and data.
     """
 
@@ -31,7 +24,7 @@ class NNRegressor(nn.Module):
         hidden_size: list[int],
         batch_size: int
     ):
-        """Initializes the neural network regressor."""
+        """Initializes structural dimensions and transfers model execution."""
         super().__init__()
         
         self.epochs: int = epochs
@@ -49,22 +42,22 @@ class NNRegressor(nn.Module):
         self.to(self.device)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Runs the input through the feed-forward network.
+        """Runs the input tensor through the feed-forward network layers.
 
         Args:
-            x (torch.Tensor): Input feature tensor.
+            x (torch.Tensor): Input feature matrix tensor maps.
 
         Returns:
-            torch.Tensor: Predicted continuous values.
+            torch.Tensor: Evaluated continuous predicted value outputs.
         """     
         return self.network(x)
 
     def fit(self, X: np.ndarray, y: np.ndarray) -> None:
-        """Trains the model using the provided NumPy datasets.
+        """Trains the multi-layer perceptron weights using batch loaders.
 
         Args:
-            X (np.ndarray): Training features.
-            y (np.ndarray): Target regression values.
+            X (np.ndarray): Training feature matrix.
+            y (np.ndarray): Target continuous regression labels.
         """
         input_size = X.shape[1]
         output_size = y.shape[1] if len(y.shape) > 1 else 1
@@ -91,13 +84,13 @@ class NNRegressor(nn.Module):
                 optimizer.step()
 
     def predict(self, X: np.ndarray) -> np.ndarray:
-        """Generates predictions for new input data.
+        """Generates continuous numeric values for incoming inference snapshots.
 
         Args:
-            X (np.ndarray): Input feature matrix.
+            X (np.ndarray): Input sample feature matrices.
 
         Returns:
-            np.ndarray: Model predictions as a NumPy array.
+            np.ndarray: Evaluated regression outputs extracted to CPU memory.
         """
         X_t = torch.from_numpy(X).to(torch.float32)
         X_t = X_t.to(self.device)
@@ -109,11 +102,11 @@ class NNRegressor(nn.Module):
         return predictions.cpu().numpy()
 
     def _get_network(self, input_size: int, output_size: int) -> None:
-        """Constructs the Multi-Layer Perceptron architecture.
+        """Constructs sequential linear layers separated by ReLU bounds.
 
         Args:
-            input_size (int): Number of features in the input data.
-            output_size (int): Dimension of the regression target.
+            input_size (int): Quantified feature dimensions from raw data.
+            output_size (int): Concrete continuous regression field array width.
         """
         self.network = nn.Sequential(
             nn.Linear(input_size, self.hidden_size[0]),
@@ -127,19 +120,15 @@ class NNRegressor(nn.Module):
 
         self.network.to(self.device)
 
-    def _prepare_loader(
-        self, 
-        X: np.ndarray, 
-        y: np.ndarray
-    ) -> tuple[DataLoader, DataLoader]:
-        """Creates a PyTorch DataLoader from NumPy arrays.
+    def _prepare_loader(self, X: np.ndarray, y: np.ndarray) -> DataLoader:
+        """Encapsulates arrays into a randomized batch tensor stream loader.
 
         Args:
-            X (np.ndarray): Feature matrix.
-            y (np.ndarray): Target labels.
+            X (np.ndarray): Target feature matrix boundaries.
+            y (np.ndarray): Accompanying numerical label mappings.
 
         Returns:
-            DataLoader: Shuffled training data loader.
+            DataLoader: An iterable tensor collection producing shuffled slices.
         """
         X_t = torch.from_numpy(X).to(torch.float32)
         y_t = torch.from_numpy(y).to(torch.float32)

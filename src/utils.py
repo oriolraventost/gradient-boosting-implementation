@@ -13,7 +13,7 @@ def first_derivative_mean_squared_error(
         train_preds (np.ndarray): Current ensemble predictions.
 
     Returns:
-        np.ndarray: The element-wise gradient.
+        np.ndarray: The element-wise gradient vector.
     """
     return 2 * (train_preds - y_train)
 
@@ -30,7 +30,7 @@ def first_derivative_log_loss(
             where columns represent distinct classes.
 
     Returns:
-        np.ndarray: The element-wise gradient.
+        np.ndarray: The element-wise gradient matrix.
     """
     y_train_one_hot = np.zeros(train_preds.shape)
     y_train_one_hot[np.arange(len(y_train)), y_train.astype(int)] = 1
@@ -38,6 +38,7 @@ def first_derivative_log_loss(
     probability_preds = softmax(train_preds)
     
     return probability_preds - y_train_one_hot
+
 
 def second_derivative_mean_squared_error(
     y_train: np.ndarray,
@@ -50,7 +51,7 @@ def second_derivative_mean_squared_error(
         train_preds (np.ndarray): Current ensemble predictions.
 
     Returns:
-        np.ndarray: The diagonal of the Hessian.
+        np.ndarray: The diagonal array elements of the Hessian matrix.
     """
     return np.full_like(train_preds, 2.0)
 
@@ -67,7 +68,7 @@ def second_derivative_log_loss(
             where columns represent distinct classes.
 
     Returns:
-        np.ndarray: The diagonal of the Hessian.
+        np.ndarray: The diagonal array elements of the Hessian matrix.
     """
     probability_preds = softmax(train_preds)
     

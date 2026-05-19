@@ -1,4 +1,3 @@
-import numpy as np
 import pandas as pd
 import json
 import yaml
@@ -14,29 +13,20 @@ from src.gb_regressor import GBRegressor
 from src.gb_classifier import GBClassifier
 
 class DataManager:
-    """Handles the ingestion, preprocessing, and persistence of data
-    artifacts.
-
-    This class manages the directory structure for raw and processed
-    datasets, loads configuration settings, and handles the serialization of
-    trained models and their associated predictions.
+    """Manages ingestion, preprocessing, and persistence of data artifacts.
 
     Attributes:
-        raw_dir (Path | None): Directory containing the original CSV datasets.
-        processed_dir (Path | None): Directory for storing cleaned/transformed
-            data.
-        model_dir (Path | None): Base directory for saving model run
-            artifacts.
-        id_column (str | None): Column name representing the unique
-            identifier.
+        raw_dir (Path | None): Path to original CSV datasets.
+        processed_dir (Path | None): Path to clean/transformed data.
+        model_dir (Path | None): Root path for saving model runs.
+        id_column (str | None): Key column name.
         target (str | None): Name of the target variable column.
         problem_type (str | None): Category of ML task.
-        test_index (range | None): Index range used for identifying test
-            predictions.
+        test_index (range | None): Index range of the test predictions.
     """
 
     def __init__(self):
-        """Initializes the DataManager attributes."""
+        """Initializes DataManager attributes to empty placeholders."""
         self.raw_dir: Path | None = None
         self.processed_dir: Path | None = None
         self.model_dir: Path | None = None
@@ -45,15 +35,13 @@ class DataManager:
         self.target: str | None = None
         self.problem_type: str | None = None
 
-        self.test_index: list[int] | None = None
+        self.test_index: range | None = None
 
     def load_config(self) -> tuple[dict, dict]:
-        """Loads YAML configuration files and sets up the project directory
-        tree.
+        """Loads configuration files and instantiates directories.
 
         Returns:
-            tuple[dict, dict]: Dataset configurations and modeling
-                hyperparameters.
+            tuple[dict, dict]: Dataset and modeling configurations.
         """
         with open(DATASETS_CONFIG_PATH, "r") as f:
             datasets_config = yaml.safe_load(f)
@@ -79,10 +67,10 @@ class DataManager:
         return datasets_config, modeling_config
     
     def load_raw_data(self) -> pd.DataFrame:
-        """Loads the initial CSV file.
+        """Loads the raw base CSV file into a DataFrame.
 
         Returns:
-            pd.DataFrame: Raw dataset.
+            pd.DataFrame: Unprocessed dataset parsed by ID column.
         """
         dataset_path = self.raw_dir / "data.csv"
         return pd.read_csv(dataset_path, index_col=self.id_column)
@@ -93,12 +81,12 @@ class DataManager:
         valid: pd.DataFrame,
         test: pd.DataFrame
     ) -> None:
-        """Saves processed datasets to the 'processed' directory.
+        """Saves clean data splits to the processed directory.
 
         Args:
-            train (pd.DataFrame): Transformed training data.
-            valid (pd.DataFrame): Transformed validation data.
-            test (pd.DataFrame): Transformed test data.
+            train (pd.DataFrame): Transformed training dataset.
+            valid (pd.DataFrame): Transformed validation dataset.
+            test (pd.DataFrame): Transformed testing dataset.
         """
         train.to_csv(self.processed_dir / "train.csv")
         valid.to_csv(self.processed_dir / "valid.csv")
@@ -107,11 +95,11 @@ class DataManager:
     def load_processed_data(
         self
     ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-        """Retrieves previously saved processed datasets.
+        """Loads previously saved processed dataset splits.
 
         Returns:
-            tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]: Processed
-                split data.
+            tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]: The training,
+                validation, and testing DataFrames.
         """
         train = pd.read_csv(
             self.processed_dir / "train.csv",
@@ -133,15 +121,15 @@ class DataManager:
     def load_image_data(
         self,
         active_dataset: str
-    ) -> tuple[Subset, Subset, np.ndarray]:
-        """Loads torchvision datasets and creates a random
-        train/validation split.
+    ) -> tuple[Subset, Subset, Subset]:
+        """Loads image datasets and creates stratified data subsets.
 
         Args:
-            active_dataset (str): Name of the dataset.
+            active_dataset (str): The configuration identifier for the dataset.
 
         Returns:
-            tuple: Training Subset, Validation Subset, and Test Subset.
+            tuple[Subset, Subset, Subset]: Train, validation, and test data
+                subsets.
         """
         image_data_map = {
             "mnist": datasets.MNIST,
@@ -194,16 +182,15 @@ class DataManager:
         model: GBRegressor | GBClassifier,
         target_transformer: RobustScaler | OrdinalEncoder
     ) -> None:
-        """Exports model weights, metadata, and predictions to a unique
-        run directory.
+        """Exports model parameters, logs, and inferences to a run directory.
 
         Args:
-            gradient_boosting_config (dict): Global boosting parameters.
-            weak_learner_config (dict): Individual learner parameters.
-            test (pd.DataFrame): Test features for final inference.
-            model (Any): The trained GBRegressor or GBClassifier.
-            target_transformer (RobustScaler | OrdinalEncoder): Transformer
-                used for inverse-scaling targets.
+            gradient_boosting_config (dict): Global ensemble configurations.
+            weak_learner_config (dict): Target parameters for base estimators.
+            test (pd.DataFrame): Test array used for generation of inferences.
+            model (GBRegressor | GBClassifier): The trained ensemble instance.
+            target_transformer (RobustScaler | OrdinalEncoder): Sklearn scaler
+                used to inverse map predicted values.
         """
         model_path = self.model_dir / f"{model.end_timestamp}"
         model_path.mkdir(parents=True, exist_ok=True)

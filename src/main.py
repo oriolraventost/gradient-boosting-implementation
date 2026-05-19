@@ -4,9 +4,13 @@ from src.processor import Processor
 from src.gb_regressor import GBRegressor
 from src.gb_classifier import GBClassifier
 
-def main():
-    """Main workflow for loading data, training, and
-    generating predictions with gradient boosting.
+def main() -> None:
+    """Executes the pipeline for data loading, processing, and boosting.
+
+    This function coordinates the end-to-end process: loading dataset and model
+    configurations, transforming target and feature arrays, instantiating the 
+    appropriate gradient boosting model type based on problem metadata, fitting 
+    the ensemble, and saving the final model artifacts.
     """
     data_manager = DataManager()
     

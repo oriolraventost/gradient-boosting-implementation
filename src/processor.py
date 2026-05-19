@@ -19,8 +19,7 @@ logging.basicConfig(
 )
 
 class Processor:
-    """Orchestrates end-to-end data transformation for Train, Validation,
-    and Test sets.
+    """Orchestrates end-to-end data transformation for splits.
 
     This class automates feature discovery and transformation using
     Scikit-Learn pipelines. It manages the transition from raw tabular or
@@ -47,7 +46,7 @@ class Processor:
         cat_cols: list[str] | None = None,
         num_cols: list[str] | None = None,
     ):
-        """Initializes the processor."""
+        """Initializes structural tracking states and task properties."""
         self.target: str = target
         self.id_column: str = id_column
         self.problem_type: str = problem_type
@@ -62,8 +61,7 @@ class Processor:
         self,
         raw_data: pd.DataFrame
     ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-        """Fits transformers to training data and applies them to all
-        data splits.
+        """Fits transformers to training data and applies them to splits.
 
         This method strictly enforces the 'no data leakage' rule: parameters
         like medians for imputation or scales for normalization are learned
@@ -74,7 +72,7 @@ class Processor:
 
         Returns:
             tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]: Processed
-                (Train, Valid, Test).
+                (Train, Valid, Test) frames.
         """
         logger.info("Processing pipeline starting...")
 
@@ -125,8 +123,8 @@ class Processor:
         y_train: np.ndarray,
         y_valid: np.ndarray,
         y_test: np.ndarray
-    ) -> tuple[np.ndarray, np.ndarray]:
-        """Normalizes or encodes the target variable.
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Normalizes or encodes the target variable across all splits.
 
         Args:
             y_train (np.ndarray): Raw training targets.
@@ -161,8 +159,7 @@ class Processor:
         self,
         data: pd.DataFrame | Subset
     ) -> tuple[np.ndarray, np.ndarray]:
-        """Extracts X and y, handling both Tabular and Computer Vision
-        formats.
+        """Extracts X and y variables handling tabular or image types.
 
         For images, this performs 0-1 normalization and converts to
         (C, H, W) format. For tabular data, it separates the configured
@@ -197,17 +194,16 @@ class Processor:
         return X, y
 
     def convert_to_numpy(self, data: pd.DataFrame | Subset) -> np.ndarray:
-        """Converts various data structures into a unified NumPy array format.
+        """Converts structural inputs into flat or tensor-like arrays.
 
         This method handles extraction from PyTorch Subsets (common in 
         computer vision) and pandas DataFrames (common in tabular tasks).
 
         Args:
-            data (pd.DataFrame | Subset): The input data structure. 
-                Can be a pandas DataFrame or a torch.utils.data.Subset.
+            data (pd.DataFrame | Subset): The raw structural instance data.
 
         Returns:
-            np.ndarray: The data converted to a NumPy array.
+            np.ndarray: Unified transformed feature array.
         """
         if isinstance(data, Subset):
             data = data.dataset.data[data.indices]
@@ -227,9 +223,8 @@ class Processor:
         
         return data
     
-    def _get_feature_transformer(self):
-        """Initialize the feature engineering pipeline for numeric and
-        categorical attributes.
+    def _get_feature_transformer(self) -> None:
+        """Constructs discrete scaling steps for column transformation.
 
         The transformation logic follows a two-pronged strategy. On
         numerical features, applies robust scaling. On categorical
@@ -260,10 +255,11 @@ class Processor:
         max_rows: int = 200_000,
         iqr_factor: float = 1.5
     ) -> pd.DataFrame:
-        """Reduces the dataset size. If the dataset exceeds the limit,
-        it performs a stratified reduction for classification problems
-        to maintain class proportions. For regression, it performs a
-        simple random shuffle and cut, after removing mild target outliers.
+        """Reduces dataset bounds safely using stratified or randomized logic.
+
+        For regression data blocks, outlier detection removes distant targets 
+        prior to capping. For classification layouts, stratification bounds are 
+        applied to guarantee precise distribution retention.
 
         Args:
             data (pd.DataFrame): The input dataframe to be processed.
@@ -271,7 +267,7 @@ class Processor:
             iqr_factor (float): Outlier removal IQR factor.
 
         Returns:
-            pd.DataFrame: A subset of the input data.
+            pd.DataFrame: A down-sampled slice matching threshold criteria.
         """
         if self.problem_type == "regression":
             q1 = data[self.target].quantile(0.25)
@@ -279,7 +275,9 @@ class Processor:
             iqr = q3 - q1
             lower = q1 - iqr_factor * iqr
             upper = q3 + iqr_factor * iqr
-            data = data[(data[self.target] >= lower) & (data[self.target] <= upper)]
+            data = data[
+                (data[self.target] >= lower) & (data[self.target] <= upper)
+            ]
 
         if len(data) <= max_rows:
             return data
@@ -304,19 +302,15 @@ class Processor:
         data: pd.DataFrame,
         test_size: int
     ) -> tuple[pd.DataFrame, pd.DataFrame]:
-        """Splits the dataset into training and test sets.
-
-        Performs a stratified split if the problem type is classification to
-        ensure class proportions are maintained across folds. Otherwise, 
-        performs a standard split.
+        """Partitions frames based on operational stratification policies.
 
         Args:
-            data (pd.DataFrame): The complete dataset containing 
-                both features and the target column.
-            test_size (int): Desired size of test dataset.
+            data (pd.DataFrame): Combined feature target table format.
+            test_size (int): Concrete raw row size boundary for target split.
 
         Returns:
-            tuple[pd.DataFrame, pd.DataFrame]: A tuple containing the split.
+            tuple[pd.DataFrame, pd.DataFrame]: Disjoint train and validation
+                or test fragments.
         """
         stratify_col = (
             data[self.target] if self.problem_type == "classification"
@@ -336,12 +330,7 @@ class Processor:
         valid: pd.DataFrame,
         test: pd.DataFrame
     ) -> None:
-        """Removes non-informative columns and training duplicates
-        to prevent bias.
-
-        Identifies constant columns based on the training set and removes
-        them from all splits. Drops duplicate rows from the training set
-        only to ensure the model doesn't overfit to repeated observations.
+        """Removes uninformative fixed dimensions and recurring train rows.
 
         Args:
             train (pd.DataFrame): Training data.
