@@ -1,0 +1,39 @@
+# ==============================================================================
+# MODEL TRAINING SETTINGS
+# ==============================================================================
+
+main:
+  active_dataset: "heart"             # Active dataset for pipeline execution
+  run_preprocess: true                # Toggle data preprocessing steps
+  train_and_predict: true             # Toggle model training and prediction
+
+gradient_boosting:
+  weak_learner_key: "decision_tree"   # Base model type used inside boosting
+  n_estimators: 1000                  # Maximum number of boosting rounds
+  learning_rate: 0.3                  # Scaling factor for each model's contribution
+  subsample: 0.8                      # Fraction of rows sampled per model
+  colsample_bytree: 0.8               # Fraction of features sampled per model
+  reg_lambda: 1.0                     # L2 regularization term
+  early_stopping_rounds: 10           # Stop if validation score plateaus
+
+decision_tree:
+  max_depth: 5                        # Maximum depth for decision trees
+
+neural_network:
+  epochs: 30                          # Number of full passes through training data
+  learning_rate: 0.0001               # Learning rate for optimizer
+  batch_size: 256                     # Training batch size
+  hidden_size:                        # Hidden layer dimensions
+    - 16
+    - 8
+
+convolutional_neural_network:
+  epochs: 30                          # Number of full passes through image data
+  learning_rate: 0.001                # Learning rate for image network optimizer
+  batch_size: 256                     # Image batch size
+  kernel_size: 5                      # Convolutional kernel size (5x5 pixels)
+  pool_size: 2                        # Max pooling downsampling factor
+  hidden_size: 32                     # Hidden layer size before output
+  channels:                           # Output channel counts per stage
+    - 8
+    - 16
