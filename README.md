@@ -8,35 +8,35 @@ A modular implementation of Gradient Boosting built from scratch using PyTorch a
 
 ```text
 ├── config/
-│   ├── modeling.yaml         # Runtime configuration and model hyperparameters
-│   └── datasets.yaml         # Datasets description
+│   ├── modeling.yaml          # Runtime configuration and model hyperparameters
+│   └── datasets.yaml          # Datasets description
 ├── data/
-│   └── dataset_key/          # Dataset-specific directories (e.g., heart, scores)
-│       ├── raw/              # Single raw source file (data.csv)
-│       └── processed/        # Processed processed splits (train.csv, valid.csv, test.csv)
+│   └── dataset_key/           # Dataset-specific directories (e.g., heart, scores)
+│       ├── raw/               # Single raw source file (data.csv)
+│       └── processed/         # Processed splits (train.csv, valid.csv, test.csv)
 ├── models/
-│   └── dataset_key/          # Training artifacts
-│       ├── info.json         # Evaluation metrics and model hyperparameters
-│       ├── predictions.csv   # Model predictions
+│   └── dataset_key/           # Training artifacts
+│       ├── info.json          # Evaluation metrics and model hyperparameters
+│       ├── predictions.csv    # Model predictions
 │       └── YYYY_MM_DD_HH_MM.joblib  # Serialized model artifacts
-├── notebooks/                # Comparison of different modeling techniques on basic datasets
+├── notebooks/                 # Comparison of different modeling techniques on basic datasets
 │   ├── cifar10.ipynb
 │   ├── mnist.ipynb
 │   ├── scores.ipynb
-│   └── heart.py
-├── src/                      # Core framework source code
-│   ├── __init__.py           # Initialization and global configuration
-│   ├── main.py               # Pipeline entry point
-│   ├── data_manager.py       # Data loading and saving methods (I/O)
-│   ├── processor.py          # Feature engineering and preprocessing
-│   ├── gb_classifier.py      # Gradient Boosting classifier
-│   ├── gb_regressor.py       # Gradient Boosting regressor
-│   ├── nn_regressor.py       # MLP-based learner module
-│   ├── cnn_regressor.py      # CNN-based learner module
-│   └── utils.py              # Utility functions
-├── .gitignore                # Git exclusions
-├── requirements.txt          # Project dependencies
-└── README.md                 # Documentation
+│   └── heart.ipynb
+├── src/                       # Core framework source code
+│   ├── __init__.py            # Initialization and global configuration
+│   ├── main.py                # Pipeline entry point
+│   ├── data_manager.py        # Data loading and saving methods (I/O)
+│   ├── processor.py           # Feature engineering and preprocessing
+│   ├── gb_classifier.py       # Gradient Boosting classifier
+│   ├── gb_regressor.py        # Gradient Boosting regressor
+│   ├── nn_regressor.py        # MLP-based learner module
+│   ├── cnn_regressor.py       # CNN-based learner module
+│   └── utils.py               # Utility functions
+├── .gitignore                 # Git exclusions
+├── requirements.txt           # Project dependencies
+└── README.md                  # Documentation
 ```
 
 ---
@@ -51,8 +51,8 @@ You can adjust the boosting engine and neural network settings in `config/modeli
 
 ```yaml
 gradient_boosting:
-  n_estimators: 1200          # Number of boosting iterations
-  learning_rate: 0.1          # Optimization step size
+  n_estimators: 1200  # Number of boosting iterations
+  learning_rate: 0.1  # Optimization step size
 
 neural_network:
   hidden_size:
@@ -77,24 +77,24 @@ data/
 * Define the schema in `config/datasets.yaml`:
 
 ```yaml
-new_dataset_name:
+new_dataset_key:
   id_column: "user_id"
-  target: "target_metric"
-  problem_type: "regression"  # or "classification"
+  target: "target_column_name"  # Target column name in the dataset
+  problem_type: "regression"    # or "classification"
   cat_cols:
     - "categorical_feature_1"
   num_cols:
     - "numerical_feature_1"
 ```
 
-* Activate the dataset in `config/modeling.yaml` by setting `active_dataset` to `"new_dataset_name"`.
+* Activate the dataset in `config/modeling.yaml` by setting `active_dataset` to `"new_dataset_key"`.
 
 ### 3. Supported Tabular Datasets
 
 The tabular datasets already configured in `config/datasets.yaml` (`heart` and `scores`) can be downloaded from:
 
-- **Playground Series S6E1**: https://www.kaggle.com/competitions/playground-series-s6e1  
-- **Playground Series S6E2**: https://www.kaggle.com/competitions/playground-series-s6e2
+- **Playground Series S6E1**: [https://www.kaggle.com/competitions/playground-series-s6e1](https://www.kaggle.com/competitions/playground-series-s6e1)
+- **Playground Series S6E2**: [https://www.kaggle.com/competitions/playground-series-s6e2](https://www.kaggle.com/competitions/playground-series-s6e2)
 
 After downloading, place the CSV as `data/scores/raw/data.csv` or `data/heart/raw/data.csv`.
 
@@ -110,18 +110,26 @@ To use one of these datasets:
 
 ```yaml
 main:
-  active_dataset: "mnist"       # or "cifar10"
-  run_preprocess: true          # must be True to load and preprocess the images
+  active_dataset: "mnist"      # or "cifar10"
+  run_preprocess: true         # must be True to load and preprocess the images
   train_and_predict: true
 ```
 
-The framework will automatically load and preprocess the built-in MNIST or CIFAR-10 dataset. No dataset folder needs to be created for these.
+The framework will load and preprocess the built-in MNIST or CIFAR-10 dataset. No dataset folder needs to be created for these.
 
 ---
 
 ## Workflow Execution
 
-### 1. Configure the Pipeline
+### 1. Install Dependencies
+
+Install the required packages:
+
+```bash
+pip install -r requirements.txt
+```
+
+### 2. Configure the Pipeline
 
 Set execution parameters in `config/modeling.yaml`:
 
@@ -132,7 +140,7 @@ main:
   train_and_predict: true
 ```
 
-### 2. Execute the Pipeline
+### 3. Execute the Pipeline
 
 Run the main entry point:
 
@@ -140,11 +148,11 @@ Run the main entry point:
 python -m src.main
 ```
 
-### 3. Review Outputs
+### 4. Review Outputs
 
 After execution, results are stored in `models/dataset_key/`:
 
-* `info.json`: Validation metrics (accuracy, \(R^2\), etc.).
+* `info.json`: Validation metrics (accuracy, R², etc.).
 * `predictions.csv`: Model predictions on the test split.
 * `.joblib` files: Serialized models for reuse and deployment.
 

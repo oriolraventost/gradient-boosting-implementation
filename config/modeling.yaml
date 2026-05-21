@@ -9,7 +9,7 @@ main:
 
 gradient_boosting:
   weak_learner_key: "decision_tree"   # Base model type used inside boosting
-  n_estimators: 1                 # Maximum number of boosting rounds
+  n_estimators: 1000                  # Maximum number of boosting rounds
   learning_rate: 0.3                  # Scaling factor for each model's contribution
   subsample: 0.8                      # Fraction of rows sampled per model
   colsample_bytree: 0.8               # Fraction of features sampled per model
